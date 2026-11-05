@@ -17,12 +17,12 @@ import java.util.concurrent.atomic.LongAdder;
 import java.util.logging.Logger;
 
 /**
- * Integração com o Vulcan sem dependência de compilação: as classes da API do Vulcan são
- * resolvidas uma única vez (MethodHandles) quando a ponte liga. Se a API mudar, a ponte
- * apenas desativa o hook e avisa no console, em vez de quebrar em cada evento.
+ * Integração com o Vulcan sem dependência de compilação (MethodHandles resolvidos uma vez).
  *
- * <p>Quem pune é o Vulcan. Aqui só escutamos {@code VulcanFlagEvent} e {@code VulcanPunishEvent}
- * (os dois são canceláveis) e cancelamos quando o filtro manda. Testado com Vulcan 2.9.7.29.</p>
+ * <p>A evidência vem do {@code VulcanFlagEvent}, que o Vulcan 2.9.7.29 dispara também nos checks
+ * com {@code punishable: false} (conferido no teste local). A ponte não altera nem cancela as flags.
+ * O {@code VulcanPunishEvent} é sempre cancelado: os comandos automáticos do Vulcan devem ficar
+ * desligados, e se algum check ainda estiver punível a ponte impede a punição e avisa.</p>
  */
 final class VulcanHook implements Listener {
 
@@ -30,14 +30,12 @@ final class VulcanHook implements Listener {
     private static final String PUNISH_EVENT = "me.frep.vulcan.api.event.VulcanPunishEvent";
     private static final String CHECK = "me.frep.vulcan.api.check.Check";
 
-    /** O que fazer com a punição do Vulcan. */
-    enum Action { PASS, CANCEL, CANCEL_AND_RESET_VL }
-
-    /** Decide se cancela. Pode ser chamado fora da thread principal. */
     interface Sink {
-        boolean onFlag(Player player);
+        /** Qualquer thread. Deve ser O(1) e sem I/O. */
+        void onFlag(Player player, String checkName, char checkType, int vl);
 
-        Action onPunish(Player player, FlagInfo check);
+        /** O Vulcan tentou punir (check punível). A punição já foi cancelada. */
+        void onVulcanPunish(Player player, FlagInfo check);
     }
 
     private final Plugin owner;
@@ -45,6 +43,7 @@ final class VulcanHook implements Listener {
     private final Sink sink;
 
     private MethodHandle flagPlayer;   // (Event)Player
+    private MethodHandle flagCheck;    // (Event)Object
     private MethodHandle punishPlayer; // (Event)Player
     private MethodHandle punishCheck;  // (Event)Object
     private MethodHandle getName;      // (Object)String
@@ -53,14 +52,15 @@ final class VulcanHook implements Listener {
     private MethodHandle getVl;        // (Object)int
     private MethodHandle getMaxVl;     // (Object)int
     private MethodHandle isPunishable; // (Object)boolean
-    private MethodHandle setVl;        // (Object,int)void; pode faltar em outras versões
 
-    private boolean active;
-    private boolean punishHooked;
-    private String version = "-";
+    private volatile boolean active;
+    private volatile boolean flagHooked;
+    private volatile String version = "-";
+    private volatile String failure = "";
 
+    private final LongAdder flags = new LongAdder();
+    private final LongAdder punishCancelled = new LongAdder();
     private final LongAdder extractionErrors = new LongAdder();
-    private final LongAdder vlResets = new LongAdder();
 
     VulcanHook(Plugin owner, Logger logger, Sink sink) {
         this.owner = owner;
@@ -68,56 +68,53 @@ final class VulcanHook implements Listener {
         this.sink = sink;
     }
 
-    /** Registra os listeners. Retorna false (e loga o motivo) se o Vulcan não estiver disponível. */
     boolean hook(PluginManager pm) {
         Plugin vulcan = pm.getPlugin("Vulcan");
         if (vulcan == null || !vulcan.isEnabled()) {
-            logger.warning("Vulcan não encontrado ou desligado: a ponte não tem o que filtrar.");
+            failure = "Vulcan não encontrado ou desligado";
+            logger.warning(failure + ": a ponte não recebe evidências.");
             return false;
         }
         ClassLoader cl = vulcan.getClass().getClassLoader();
         try {
             Class<? extends Event> flagClass = event(FLAG_EVENT, cl);
             Class<? extends Event> punishClass = event(PUNISH_EVENT, cl);
-            if (punishClass == null) {
-                logger.severe("VulcanPunishEvent não encontrado: as punições do Vulcan NÃO podem ser filtradas.");
+            if (flagClass == null) {
+                failure = "VulcanFlagEvent não encontrado nesta versão do Vulcan";
+                logger.severe(failure + ": a automação fica desligada.");
                 return false;
             }
             Class<?> checkClass = Class.forName(CHECK, true, cl);
             MethodHandles.Lookup lk = MethodHandles.publicLookup();
-            punishPlayer = player(lk, punishClass);
-            punishCheck = lk.findVirtual(punishClass, "getCheck", MethodType.methodType(checkClass))
-                    .asType(MethodType.methodType(Object.class, Event.class));
+            flagPlayer = player(lk, flagClass);
+            flagCheck = check(lk, flagClass, checkClass);
             getName = checkGetter(lk, checkClass, "getName", String.class);
             getType = checkGetter(lk, checkClass, "getType", char.class);
             getCategory = checkGetter(lk, checkClass, "getCategory", String.class);
             getVl = checkGetter(lk, checkClass, "getVl", int.class);
             getMaxVl = checkGetter(lk, checkClass, "getMaxVl", int.class);
             isPunishable = checkGetter(lk, checkClass, "isPunishable", boolean.class);
-            try {
-                setVl = lk.findVirtual(checkClass, "setVl", MethodType.methodType(void.class, int.class))
-                        .asType(MethodType.methodType(void.class, Object.class, int.class));
-            } catch (ReflectiveOperationException e) {
-                setVl = null;
-                logger.warning("Check#setVl não encontrado: o VL não será zerado após um bloqueio.");
-            }
 
-            // HIGH + ignoreCancelled: decide antes do MONITOR; o Vulcan lê isCancelled() depois.
-            pm.registerEvent(punishClass, this, EventPriority.HIGH, (l, e) -> onPunish(e), owner, true);
-            punishHooked = true;
-            if (flagClass != null) {
-                flagPlayer = player(lk, flagClass);
-                pm.registerEvent(flagClass, this, EventPriority.HIGH, (l, e) -> onFlag(e), owner, true);
+            // MONITOR + ignoreCancelled: só olha (não altera a flag); flag cancelada por outro plugin não conta.
+            pm.registerEvent(flagClass, this, EventPriority.MONITOR, (l, e) -> onFlag(e), owner, true);
+            if (punishClass != null) {
+                punishPlayer = player(lk, punishClass);
+                punishCheck = check(lk, punishClass, checkClass);
+                pm.registerEvent(punishClass, this, EventPriority.HIGHEST, (l, e) -> onPunish(e), owner, false);
             } else {
-                logger.warning("VulcanFlagEvent não encontrado: só as punições serão filtradas (o VL pode subir com lag).");
+                logger.warning("VulcanPunishEvent não encontrado: a ponte não consegue impedir punições do próprio "
+                        + "Vulcan. Deixe todos os checks com punishable: false.");
             }
+            flagHooked = true;
             active = true;
+            failure = "";
             version = vulcan.getPluginMeta().getVersion();
-            logger.info("Vulcan " + version + " conectado: filtrando punições"
-                    + (flagClass != null ? " e flags." : "."));
+            logger.info("Vulcan " + version + " conectado: lendo flags (VulcanFlagEvent)"
+                    + (punishClass != null ? " e cancelando as punições automáticas do Vulcan." : "."));
             return true;
         } catch (Throwable t) {
-            logger.severe("Falha ao integrar com o Vulcan (" + t + "). Nada será filtrado.");
+            failure = "falha ao integrar: " + t;
+            logger.severe("Falha ao integrar com o Vulcan (" + t + "). A automação fica desligada.");
             HandlerList.unregisterAll(this);
             active = false;
             return false;
@@ -130,56 +127,46 @@ final class VulcanHook implements Listener {
     }
 
     private void onFlag(Event event) {
+        flags.increment();
         Player player;
+        String name;
+        char type;
+        int vl;
         try {
             player = (Player) flagPlayer.invokeExact(event);
+            Object check = (Object) flagCheck.invokeExact(event);
+            if (player == null || check == null) {
+                return;
+            }
+            name = (String) getName.invokeExact(check);
+            type = (char) getType.invokeExact(check);
+            vl = (int) getVl.invokeExact(check);
         } catch (Throwable t) {
             extractionErrors.increment();
             return;
         }
-        if (player != null && sink.onFlag(player)) {
-            ((Cancellable) event).setCancelled(true);
-        }
+        sink.onFlag(player, name, type, vl);
     }
 
     private void onPunish(Event event) {
+        ((Cancellable) event).setCancelled(true);
+        punishCancelled.increment();
         Player player;
         FlagInfo info = null;
-        Object check;
         try {
             player = (Player) punishPlayer.invokeExact(event);
-            check = (Object) punishCheck.invokeExact(event);
+            Object check = (Object) punishCheck.invokeExact(event);
             if (check != null) {
-                info = new FlagInfo(
-                        (String) getName.invokeExact(check),
-                        (char) getType.invokeExact(check),
-                        (String) getCategory.invokeExact(check),
-                        (int) getVl.invokeExact(check),
-                        (int) getMaxVl.invokeExact(check),
-                        (boolean) isPunishable.invokeExact(check));
+                info = new FlagInfo((String) getName.invokeExact(check), (char) getType.invokeExact(check),
+                        (String) getCategory.invokeExact(check), (int) getVl.invokeExact(check),
+                        (int) getMaxVl.invokeExact(check), (boolean) isPunishable.invokeExact(check));
             }
         } catch (Throwable t) {
-            // Sem conseguir ler o evento, não dá para provar que a conexão está boa: bloqueia.
             extractionErrors.increment();
-            ((Cancellable) event).setCancelled(true);
             return;
         }
-        if (player == null) {
-            ((Cancellable) event).setCancelled(true);
-            return;
-        }
-        Action action = sink.onPunish(player, info);
-        if (action == Action.PASS) {
-            return;
-        }
-        ((Cancellable) event).setCancelled(true);
-        if (action == Action.CANCEL_AND_RESET_VL && check != null && setVl != null) {
-            try {
-                setVl.invokeExact(check, 0);
-                vlResets.increment();
-            } catch (Throwable t) {
-                extractionErrors.increment();
-            }
+        if (player != null) {
+            sink.onVulcanPunish(player, info);
         }
     }
 
@@ -187,6 +174,12 @@ final class VulcanHook implements Listener {
             throws ReflectiveOperationException {
         return lk.findVirtual(c, "getPlayer", MethodType.methodType(Player.class))
                 .asType(MethodType.methodType(Player.class, Event.class));
+    }
+
+    private static MethodHandle check(MethodHandles.Lookup lk, Class<? extends Event> c, Class<?> checkClass)
+            throws ReflectiveOperationException {
+        return lk.findVirtual(c, "getCheck", MethodType.methodType(checkClass))
+                .asType(MethodType.methodType(Object.class, Event.class));
     }
 
     @SuppressWarnings("unchecked")
@@ -207,8 +200,10 @@ final class VulcanHook implements Listener {
     }
 
     boolean active() { return active; }
-    boolean punishHooked() { return punishHooked; }
+    boolean flagHooked() { return flagHooked; }
     String version() { return version; }
+    String failure() { return failure; }
+    long flags() { return flags.sum(); }
+    long punishCancelled() { return punishCancelled.sum(); }
     long extractionErrors() { return extractionErrors.sum(); }
-    long vlResets() { return vlResets.sum(); }
 }

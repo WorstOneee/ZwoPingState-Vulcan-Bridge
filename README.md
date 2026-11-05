@@ -1,65 +1,64 @@
 # ZwoPingState + ZwoVulcanBridge
 
-Plugins para **Paper 1.21.11 / Java 21** do servidor **Serpens New Era**. Objetivo: impedir que lag vire punição
-injusta do anticheat, com custo baixo no servidor.
+Plugins para **Paper 1.21.11 / Java 21** do servidor **Serpens New Era** (Velocity + Geyser + Floodgate).
+Objetivo: punição automática do anticheat **só com evidência forte**, nunca por lag, e com custo baixo.
 
 | Plugin | Papel |
 | --- | --- |
-| **ZwoPingState** | Responde, por UUID, `STABLE`, `UNSTABLE` ou `UNKNOWN` sobre a conexão do jogador. **Não pune ninguém.** |
-| **ZwoVulcanBridge** | Filtro de lag: **quem pune é o Vulcan**; a ponte só deixa a punição do Vulcan passar quando a conexão é `STABLE` e cancela nos outros casos (lag, sem provedor, Bedrock, teleporte/respawn). Avisa se o Vulcan estiver configurado com comando que bane IP. Começa em modo **observação** (bloqueia tudo e só registra). |
+| **ZwoPingState 1.0.0** | Responde, por UUID, `STABLE`, `UNSTABLE` ou `UNKNOWN` sobre a conexão do jogador. **Não pune ninguém.** |
+| **ZwoVulcanBridge 3.0.0** | **Quem decide é a ponte.** Lê as flags do Vulcan, junta evidências de checks aprovados e aplica a sequência por UUID: **kick → kick (outra sessão) → ban temporário de 24 h só do perfil**, registrado pelo ModPanel. Começa em **observação**. |
+| **ModPanel 3.1.0** | Painel de moderação. A 3.1.0 adiciona a `ProfileBanApi`: ban temporário por UUID com resultado conferido, **sem IP**. |
 
 ```
-Vulcan ──VL máximo──▶ VulcanPunishEvent ──▶ ZwoVulcanBridge ──connection(UUID)──▶ ZwoPingState (O(1), memória)
-                                              │ STABLE, sem lag recente, Java, sem proteção?
-                                              │   não → cancela a punição (e zera o VL do check)
-                                              ▼   sim → OBSERVE: cancela e registra "teria passado"
-                                                        ENFORCE: o Vulcan executa os punishment-commands
-                                                                 (ex.: /mpbanperfil %player% ... = ban só por perfil)
+Vulcan (punishable: false) ──VulcanFlagEvent──▶ ZwoVulcanBridge
+                                                  │ O(1): conexão STABLE? (ZwoPingState) Java confirmado? sem proteção?
+                                                  │       check aprovado? VL >= min-vl?  → guarda a flag (memória fixa)
+                                                  │ >= 2 famílias, cada check repetido min-flags vezes na janela
+                                                  ▼ = OCORRÊNCIA (no máximo 1 por sessão)
+                                  thread do servidor: revalida conexão, proteção, sessão
+                                                  │ OBSERVE → só registra "teria aplicado"
+                                                  ▼ ENFORCE → 1º kick / 2º kick / ban 24h via ProfileBanApi
+                                  histórico por UUID (historico.yml, gravado fora da thread do servidor)
 ```
 
-- Instalação: [docs/INSTALACAO.md](docs/INSTALACAO.md)
-- Diagnóstico (`/pingstate`, `/zvb`): [docs/DIAGNOSTICO.md](docs/DIAGNOSTICO.md)
-- O que foi testado e o que ficou pendente: [docs/VALIDACAO.md](docs/VALIDACAO.md)
+- Instalação, ativação e rollback: [docs/INSTALACAO.md](docs/INSTALACAO.md)
+- Diagnóstico (`/pingstate`, `/zvb`, `decisoes.log`, `historico.yml`): [docs/DIAGNOSTICO.md](docs/DIAGNOSTICO.md)
+- O que foi testado, custo medido e o que ficou pendente: [docs/VALIDACAO.md](docs/VALIDACAO.md)
 - Configurações comentadas: [ZwoPingState](zwo-ping-state/src/main/resources/config.yml) ·
   [ZwoVulcanBridge](zwo-vulcan-bridge/src/main/resources/config.yml)
 
-## Como o ZwoPingState decide
-
-- **Uma única tarefa** síncrona por tick, com **orçamento fixo**: no máximo `max-players-per-tick` jogadores
-  lidos por tick e um limite de tempo por tick. Os jogadores são lidos em rodízio: com 100 jogadores e
-  intervalo de 20 ticks, ~5 leituras por tick; cada jogador é lido 1×/s.
-- Lê `Player#getPing()` na thread do servidor. No Paper 1.21.11 esse valor é a **média dos keep-alives dos
-  últimos 5 s** (um keep-alive por segundo), conferido no bytecode do servidor.
-- Janela circular fixa por jogador (20 amostras). Métricas: último, média, mín/máx, jitter (diferença média
-  entre amostras), amplitude (máx − mín) e picos.
-- Motivos separados: ping alto, picos, ping oscilando, servidor instável, em recuperação, dados insuficientes,
-  dados vencidos, Bedrock, falha na coleta.
-- **Recuperação contínua**: depois de qualquer instabilidade, só volta a `STABLE` após `recovery.player-seconds`
-  seguidos dentro dos limites. Uma amostra boa não libera nada.
-- **Servidor**: TPS curto (medido pela própria tarefa), MSPT médio dos últimos 20 ticks (duração que o Paper informa
-  no fim de cada tick, somada em janela fixa; sem chamar `getAverageTickTime`) e marcador global
-  de travada (um tick longo). Nunca percorre jogadores para isso.
-- **Consulta O(1)**: um `get` no mapa + leitura volátil + idade + saúde global. Não percorre a janela, não cria
-  tarefa, não chama Bukkit. Dados mais velhos que `stale-after-seconds` = `UNKNOWN`.
-- Entrada/reconexão começa em `UNKNOWN`. Bedrock = `UNKNOWN` (o Paper vê o ping do Geyser).
-- Sem banco, HTTP, DNS, ICMP, injeção de pacotes, escrita em disco ou log no caminho de coleta/consulta.
-
 ## Como a ponte decide
 
-1. Bedrock → punição do Vulcan cancelada (nunca punido automaticamente). As flags seguem para a staff ver.
-2. Proteção de teleporte/respawn/troca de mundo → cancelada.
-3. Conexão diferente de `STABLE` **ou provedor ausente/desligado** → cancelada.
-4. Flag com lag nos últimos `filter.recent-lag-seconds` (120 s) → cancelada: o VL foi inflado por lag.
-5. Senão: em `ENFORCE` a punição do Vulcan passa; em `OBSERVE` (padrão) é cancelada e registrada como "teria
-   passado" em `punicoes.log`.
-6. Ao cancelar por lag/proteção/Bedrock em `ENFORCE`, o VL do check é zerado no Vulcan.
-7. As flags **não** são canceladas por padrão (`filter.cancel-flags: false`): a flag segue inteira no Vulcan
-   (alerta e setback) e só a punição é filtrada. Cancelar a flag provavelmente também cancela o setback, e quem
-   forja lag andaria livre (não confirmado no teste local).
+**Evidência (caminho de cada flag, O(1), na thread em que o Vulcan dispara):**
 
-> **Ban só por perfil:** o `/mpban` do ModPanel também bane o último IP. Nos `punishment-commands` do Vulcan use
-> `/mpbanperfil %player% <motivo>` (comando novo do ModPanel). A ponte avisa se achar comandos de IP no config
-> do Vulcan.
+1. Conexão diferente de `STABLE`, ou provedor ausente → **descarta toda a sequência** do jogador.
+2. Sessão que já teve ocorrência → ignora (no máximo uma por sessão).
+3. Bedrock → fora da automação.
+4. Check não aprovado no `config.yml` ou VL abaixo do `min-vl` → não conta.
+5. Proteção de teleporte, respawn ou troca de mundo ativa → não conta.
+6. Senão, guarda a flag no anel daquele check (só as últimas `min-flags`, máx. 32).
+7. Ocorrência = pelo menos `min-families` (mínimo 2) famílias com um check que repetiu `min-flags` vezes
+   dentro de `window-seconds`. Uma flag isolada, ou várias do mesmo check/família, nunca bastam.
+
+Sem I/O, SQL, rede, varredura de jogadores nem tarefa agendada por flag. Só a ocorrência agenda **uma** tarefa.
+
+**Ação (thread do servidor):**
+
+1. Confere que o jogador ainda está na **mesma sessão**, e revalida conexão e proteção. Se falhar, descarta.
+2. Conta não confirmada como Java (Floodgate) → só registro para revisão. Prefixo do nome não prova Java.
+3. `OBSERVE` → registra o que **teria** feito, sem tocar no histórico real.
+4. Automação bloqueada (sem checks, Vulcan, provedor ou ModPanel 3.1) → registro para revisão, com o motivo.
+5. Senão, aplica o próximo passo do histórico do UUID:
+   - **1º kick** e **2º kick** (em outra sessão): só contam quando a desconexão é confirmada como resultado da
+     ponte (`PlayerQuitEvent` com motivo KICKED depois do kick não cancelado). Kick cancelado, saída
+     voluntária e timeout não contam.
+   - **Ban temporário** (`sequence.ban-duration`, padrão 24h) pela `ProfileBanApi`. Só marca como aplicado com
+     resposta `APPLIED` conferida pelo ModPanel, sem IP. Falha, timeout ou resposta incerta → **revisão**, sem
+     nova tentativa automática.
+6. O histórico vale `sequence.validity` (7 dias) a partir do 1º kick.
+
+O Vulcan só detecta: todos os checks com `punishable: false`. Se algum ainda punir, a ponte cancela a punição
+e avisa no console.
 
 ## Compilar
 
@@ -67,15 +66,18 @@ Vulcan ──VL máximo──▶ VulcanPunishEvent ──▶ ZwoVulcanBridge ─
 ./gradlew release
 ```
 
-Gera `build/release/ZwoVulcanBridge-2.0.0.jar` e `build/release/ZwoPingState-1.0.0.jar`. Os JARs já compilados
-desta versão estão em [`dist/`](dist). O ZwoPingState
-compila contra o JAR da ponte (`compileOnly`) e **não embute** a interface `PingStateProvider`.
+Gera `build/release/ZwoVulcanBridge-3.0.0.jar` e `build/release/ZwoPingState-1.0.0.jar`. Os JARs prontos estão em
+[`dist/`](dist). O ModPanel 3.1.0 é compilado no repositório dele (`mvn package`); o JAR dele também está em
+`dist/` por conveniência.
+
+A ponte compila contra uma cópia da interface `dev.zwo.modpanel.api` (source set `modpanelApi`), que **não vai
+no JAR**: em execução as classes vêm do próprio ModPanel.
 
 ## Estrutura
 
 ```
-zwo-vulcan-bridge/   API br.com.serpens.vulcanbridge.api (PingStateProvider, ConnectionState...)
-                     + filtro de punições do Vulcan (core/ sem Bukkit, testável)
+zwo-vulcan-bridge/   API br.com.serpens.vulcanbridge.api (PingStateProvider...)
+                     + escalada (core/ sem Bukkit, testável) + integração Vulcan/ModPanel/Floodgate
 zwo-ping-state/      plugin do provedor (core/ sem Bukkit, testável)
 docs/                instalação, diagnóstico, validação
 dist/                JARs prontos desta versão

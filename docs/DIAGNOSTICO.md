@@ -57,30 +57,71 @@ O que observar:
 
 ## ZwoVulcanBridge — `/zvb`
 
-Permissões: `zwovulcanbridge.staff` (ver), `zwovulcanbridge.admin` (reload),
-`zwovulcanbridge.alerts` (receber avisos de punições do Vulcan liberadas/bloqueadas).
+Permissões: `zwovulcanbridge.staff` (ver), `zwovulcanbridge.admin` (reload e limpar),
+`zwovulcanbridge.alerts` (receber o aviso de cada decisão). Todas `op` por padrão.
 
-- `/zvb status`: modo, Vulcan conectado, provedor, flags vistas, punições do Vulcan liberadas/bloqueadas por
-  motivo (observação, instável, desconhecida, lag recente, sem provedor, proteção, Bedrock), quantas vezes o VL
-  foi zerado e se o config do Vulcan tem comandos que banem IP.
-- `/zvb jogador <nick>`: conexão que a ponte recebe, se uma punição do Vulcan **passaria agora**, proteção
-  ativa (teleporte/respawn), flags com lag nesta sessão e as últimas decisões.
-- `/zvb reload`: recarrega o config e confere de novo os comandos do Vulcan.
+### `/zvb status`
 
-Cada punição do Vulcan (nunca cada flag) vira uma linha em `plugins/ZwoVulcanBridge/punicoes.log`, no máximo uma
-por jogador e check a cada 30 s:
+- **Modo** (`OBSERVE`/`ENFORCE`) e **Automação**: `liberada` ou `BLOQUEADA — <motivos>` (sem checks aprovados,
+  menos de 2 famílias, Vulcan desconectado, provedor indisponível, ModPanel ausente/incompatível).
+- Checks aprovados, famílias e problemas do config.
+- Vulcan: flags vistas, punições do Vulcan canceladas, erros de leitura.
+- Provedor de conexão, ModPanel (`pronto — ModPanel 3.1.0 (API 1)`, `AUSENTE` ou `INCOMPATÍVEL — motivo`) e
+  Floodgate.
+- Contadores: flags aprovadas, descartes por conexão, flags em proteção, ocorrências, observação, revalidação,
+  kicks enviados/confirmados/cancelados, bans pedidos/aplicados/em revisão.
+- Histórico (UUIDs, validade) e fila de gravação (pendentes, recusadas, falhas).
+- Avisos: checks do Vulcan com `punishable: true`, comandos do Vulcan que banem IP.
+
+### `/zvb jogador <nick>`
+
+Conexão que a ponte recebe agora, tipo de conta (Java confirmado / Bedrock / incerto, com o motivo), proteção
+ativa, estágio da sessão (`IDLE`, `TRIGGERED`, `DONE`), evidências na janela, último descarte e a decisão desta
+sessão.
+
+### `/zvb historico <nick|uuid>`
+
+Kicks confirmados, data do 1º kick e até quando vale, estado do ban (`NONE`, `PENDING`, `APPLIED`, `REVIEW`, com
+o detalhe do ModPanel) e o **próximo passo** que seria aplicado.
+
+### `/zvb limpar <nick|uuid>` e `/zvb reload`
+
+`limpar` zera o histórico do UUID na ponte (não remove bans: use `/mpunban`). `reload` recarrega o config,
+descarta as evidências em andamento e confere de novo o ModPanel e o config do Vulcan.
+
+## `decisoes.log`
+
+`plugins/ZwoVulcanBridge/decisoes.log`. Uma linha por **decisão**, nunca por flag, gravada fora da thread do
+servidor. Exemplos reais do teste local:
 
 ```
-[2026-11-04 22:43:40] Punição do Vulcan LIBERADA: zfs0 (30dad699-...) — motion (E) VL 3/3 — conexão STABLE/OK — modo ENFORCE
+[2026-11-05 02:04:03] zqc3 (6af5e353-...) — [OBSERVE] ocorrência válida; teria aplicado: 1º kick (kicks confirmados no histórico real: 0; nada foi aplicado) — evidências: speed x2 (VL até 11, família speed), motion x2 (VL até 3, família motion) — modo OBSERVE
+[2026-11-05 02:05:47] zqe1 (3cd2bfb1-...) — kick 1 CONFIRMADO (desconexão pela ponte); kicks no histórico: 1; válido até ... — modo ENFORCE
+[2026-11-05 02:20:28] zqi1 (077681e0-...) — [revisão] ocorrência válida, mas a automação está BLOQUEADA (ModPanel: INCOMPATÍVEL — ...); próximo passo seria: 1º kick — ...
+[2026-11-05 02:29:24] zlx0 (6f4ad5b8-...) — ocorrência DESCARTADA na revalidação: conexão UNSTABLE/SERVER_UNSTABLE — ...
+[2026-11-05 01:56:38] zqb1 (bd1485cd-...) — [revisão] ocorrência registrada só para revisão — conta incerto (só revisão) (Floodgate ausente: não dá para confirmar Java); ...
 ```
+
+Procure por `[revisão]`: são os casos que precisam de alguém da staff (conta incerta, automação bloqueada, kick
+cancelado, ban com falha/rejeitado/incerto).
+
+## `historico.yml`
+
+`plugins/ZwoVulcanBridge/historico.yml`, por UUID: `nome`, `kicks`, `primeiro-kick`, `ultimo-kick`,
+`ultima-sessao`, `ban`, `ban-em`, `pedido`, `ban-detalhe`. Gravado em arquivo temporário e trocado de uma vez
+(não fica pela metade). Ao ligar, entradas vencidas são removidas e um ban `PENDING` (servidor caiu no meio)
+vira `REVIEW`. **Não edite com o servidor ligado**; use `/zvb limpar`.
 
 ## Problemas comuns
 
 | Sintoma | Causa provável |
 | --- | --- |
-| `Provedor de conexão: nenhum provedor registrado` | ZwoPingState ausente/desligado → **todas as punições do Vulcan são bloqueadas** |
-| Aviso "comando(s) que podem banir IP" | troque `mpban`/`ban-ip` por `mpbanperfil %player% <motivo>` no config do Vulcan |
-| Jogador voando/andando livre com ping alto | com `filter.cancel-flags: true` o Vulcan provavelmente não dá setback nessas flags; deixe `false` |
+| `Automação: BLOQUEADA — nenhum check aprovado` | normal no config novo; aprove checks em `evidence.checks` |
+| `ModPanel: INCOMPATÍVEL` | ModPanel anterior ao 3.1.0 (sem a `ProfileBanApi`); atualize o painel |
+| `Provedor de conexão: nenhum provedor registrado` | ZwoPingState ausente/desligado → todas as flags são descartadas |
+| Todas as ocorrências "conta incerta" | Floodgate não está no Paper (backend), ou a API dele falhou |
+| "O Vulcan tentou punir N vez(es)" | algum check ainda está com `punishable: true` no config do Vulcan |
+| Aviso "comando(s) que banem IP" | o config do Vulcan tem `mpban`/`ban-ip`...; com `punishable: false` não roda, mas convém remover |
+| Ban "em revisão" | ModPanel recusou (alvo protegido), falhou ou não respondeu a tempo; confira no painel |
 | Todos UNKNOWN / "dados vencidos" | travada longa ou coleta parada; veja `/pingstate stats` |
-| Todos UNSTABLE / "servidor instável" | TPS/MSPT ruins ou travadas recentes; veja a linha "Servidor" |
 | Jogadores desconectados com "Invalid packet" | packetevents incompatível com o Vulcan (não é destes plugins) |

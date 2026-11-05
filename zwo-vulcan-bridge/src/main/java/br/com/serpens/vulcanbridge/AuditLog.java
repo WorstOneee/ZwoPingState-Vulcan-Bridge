@@ -7,52 +7,51 @@ import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.LongAdder;
 import java.util.logging.Logger;
 
 /**
- * {@code plugins/ZwoVulcanBridge/punicoes.log}: uma linha por PUNIÇÃO do Vulcan (liberada ou
- * bloqueada). Nunca por flag. Escrita numa única thread própria, nunca na thread do servidor.
+ * {@code plugins/ZwoVulcanBridge/decisoes.log}: uma linha por DECISÃO (ocorrência, kick, ban,
+ * descarte na revalidação, revisão). Nunca por flag. Gravado pela {@link IoWorker}.
  */
 final class AuditLog {
 
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final File file;
+    private final IoWorker io;
     private final Logger logger;
-    private final ExecutorService io = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "ZwoVulcanBridge-IO");
-        t.setDaemon(true);
-        return t;
-    });
+    private final LongAdder dropped = new LongAdder();
+    private final LongAdder failed = new LongAdder();
 
-    AuditLog(File dataFolder, Logger logger) {
-        this.file = new File(dataFolder, "punicoes.log");
+    AuditLog(File dataFolder, IoWorker io, Logger logger) {
+        this.file = new File(dataFolder, "decisoes.log");
+        this.io = io;
         this.logger = logger;
     }
 
     void write(String line) {
         String stamped = "[" + LocalDateTime.now().format(TS) + "] " + line + System.lineSeparator();
-        io.execute(() -> {
-            try {
-                Files.writeString(file.toPath(), stamped, StandardCharsets.UTF_8,
-                        StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-            } catch (IOException e) {
-                logger.warning("Falha ao gravar punicoes.log: " + e.getMessage());
-            }
-        });
+        if (!io.submit(() -> append(stamped))) {
+            dropped.increment();
+        }
     }
 
-    void shutdown() {
-        io.shutdown();
+    private void append(String stamped) {
         try {
-            if (!io.awaitTermination(5, TimeUnit.SECONDS)) {
-                io.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+            Files.writeString(file.toPath(), stamped, StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (IOException e) {
+            failed.increment();
+            logger.warning("Falha ao gravar decisoes.log: " + e.getMessage());
         }
+    }
+
+    long dropped() {
+        return dropped.sum();
+    }
+
+    long failed() {
+        return failed.sum();
     }
 }

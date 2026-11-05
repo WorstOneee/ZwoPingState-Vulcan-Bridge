@@ -2,17 +2,14 @@ package br.com.serpens.vulcanbridge.core;
 
 import java.util.Locale;
 
-/** Modo de operação da ponte. Quem pune é sempre o Vulcan; a ponte só deixa passar ou bloqueia. */
+/** Modo de operação da ponte. */
 public enum BridgeMode {
     /**
-     * Padrão. Bloqueia TODAS as punições do Vulcan e só registra o que teria passado. Não cancela
-     * flags (os alertas do Vulcan continuam normais).
+     * Padrão. A ponte junta as evidências e registra o que teria feito, mas não kicka, não bane e
+     * não altera o histórico real de ocorrências.
      */
     OBSERVE,
-    /**
-     * O Vulcan pune normalmente quando a conexão está STABLE. Com lag, provedor ausente, Bedrock ou
-     * proteção de teleporte/respawn, a punição é cancelada (e, se configurado, a flag também).
-     */
+    /** A ponte aplica a sequência (kick, kick, ban temporário pelo ModPanel) por UUID. */
     ENFORCE;
 
     public static BridgeMode parse(String raw) {
@@ -20,7 +17,7 @@ public enum BridgeMode {
             return OBSERVE;
         }
         return switch (raw.trim().toUpperCase(Locale.ROOT)) {
-            case "ENFORCE", "FILTER", "FILTRAR", "PUNIR", "ATIVO" -> ENFORCE;
+            case "ENFORCE", "PUNIR", "ATIVO" -> ENFORCE;
             default -> OBSERVE;
         };
     }

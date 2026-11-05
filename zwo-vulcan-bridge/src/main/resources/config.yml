@@ -1,77 +1,105 @@
 # =====================================================================
-#  ZwoVulcanBridge — filtro de lag para as punições do Vulcan
+#  ZwoVulcanBridge 3 — escalada do anticheat por UUID
 # =====================================================================
-#  Quem pune é o VULCAN (pelos punishment-commands do config do Vulcan).
-#  Esta ponte NÃO kicka nem bane ninguém. Ela só deixa passar ou cancela:
+#  Quem decide agora é a PONTE. O Vulcan só detecta:
+#   - No config do Vulcan, deixe TODOS os checks com punishable: false.
+#     (Se algum ainda punir, a ponte cancela a punição e avisa no console.)
+#   - A ponte lê as flags do Vulcan (VulcanFlagEvent), que continuam
+#     chegando com punishable: false.
 #
-#   1. O Vulcan atinge o VL máximo de um check e vai punir
-#      (VulcanPunishEvent).
-#   2. A ponte pergunta ao provedor de conexão (ZwoPingState) o estado do
-#      jogador: STABLE, UNSTABLE ou UNKNOWN.
-#   3. A punição é CANCELADA se a conexão não for STABLE, se o provedor
-#      não estiver disponível, se o jogador for Bedrock ou se ele acabou de
-#      teleportar/renascer/trocar de mundo. Lag nunca vira punição.
-#   4. Com a conexão STABLE, a punição do Vulcan segue normalmente (só no
-#      modo ENFORCE).
+#  Uma OCORRÊNCIA só vale quando, dentro de evidence.window-seconds:
+#   - há flags de checks APROVADOS abaixo, com VL >= min-vl;
+#   - cada check aprovado repetiu pelo menos min-flags vezes;
+#   - pelo menos min-families FAMÍLIAS diferentes cumpriram isso
+#     (uma flag isolada ou várias do mesmo check nunca bastam);
+#   - a conexão ficou STABLE o tempo todo (ZwoPingState). Uma flag com a
+#     conexão UNSTABLE/UNKNOWN, ou sem provedor, DESCARTA a sequência;
+#   - a conexão é conferida de novo logo antes de agir;
+#   - a conta é Java CONFIRMADA (Floodgate). Bedrock fica fora. Conta
+#     incerta só gera registro para revisão.
+#  No máximo UMA ocorrência por sessão.
 #
-#  Ban SÓ POR PERFIL: nos punishment-commands do Vulcan use
-#      /mpbanperfil %player% <motivo>
-#  e NÃO use /mpban, /mptempban, /mpipban ou /ban-ip: o /mpban do ModPanel
-#  também bane o último IP. A ponte avisa no console e no /zvb status se
-#  encontrar esses comandos no config do Vulcan.
+#  Sequência por UUID (vale sequence.validity a partir do 1º kick):
+#   1ª ocorrência -> kick
+#   2ª (outra sessão) -> 2º kick
+#   3ª (outra sessão) -> ban temporário SÓ DO PERFIL pelo ModPanel
+#  Um kick só conta se a desconexão for confirmada como resultado da ponte
+#  (kick cancelado, saída voluntária e timeout não contam).
+#  O ban usa a ProfileBanApi do ModPanel 3.1.0+: nunca bane IP e nunca
+#  executa /mpban, /mptempban ou /ban-ip. Se o ModPanel faltar ou for
+#  antigo, a automação fica BLOQUEADA (veja /zvb status).
 #
-#  Use /zvb status para conferir tudo depois de editar.
+#  Use /zvb status depois de editar e /zvb reload para aplicar.
 # =====================================================================
 
-# OBSERVE  = padrão. Bloqueia TODAS as punições do Vulcan e só registra em
-#            punicoes.log o que teria passado. Não cancela flags.
-# ENFORCE  = o Vulcan pune normalmente quando a conexão está STABLE; com lag
-#            (ou sem provedor, Bedrock, proteção) a punição é cancelada.
-# Mantenha OBSERVE até revisar o punicoes.log por alguns dias.
+# OBSERVE = padrão. Junta as evidências e registra em decisoes.log o que
+#           TERIA feito. Não kicka, não bane e não mexe no histórico real.
+# ENFORCE = aplica a sequência. Só ligue depois de revisar o decisoes.log.
 mode: OBSERVE
 
-filter:
-  # Se houve flag com a conexão UNSTABLE (lag de verdade) há menos que isso, a
-  # punição do Vulcan é bloqueada mesmo que a conexão já esteja STABLE: o VL
-  # daquele momento foi inflado por lag. 0 = desliga. (Ignorado quando
-  # cancel-flags = true, porque aí o lag nem chega a somar VL.)
-  recent-lag-seconds: 120
-  # Só no modo ENFORCE: ao bloquear uma punição por lag/proteção/Bedrock, zera
-  # o VL daquele check no Vulcan. Sem isso, o Vulcan tentaria punir de novo a
-  # cada nova flag acima do VL máximo.
-  reset-vl-when-blocked: true
-  # Só no modo ENFORCE: cancela também as FLAGS do Vulcan enquanto a conexão
-  # não estiver STABLE (o VL não sobe por lag).
-  # NÃO recomendado: a staff deixa de ver os alertas dessas flags e, muito
-  # provavelmente, o Vulcan também deixa de dar setback nelas (não confirmado
-  # no teste). Quem forja lag (atrasando o keep-alive) poderia andar livre.
-  # Com false, a flag segue inteira no Vulcan; só a PUNIÇÃO é filtrada.
-  cancel-flags: false
+evidence:
+  # Janela de tempo para juntar as flags de uma ocorrência.
+  window-seconds: 120
+  # Famílias diferentes exigidas na janela (mínimo 2).
+  min-families: 2
+  # Checks aprovados. VAZIO = nenhuma ocorrência possível (automação parada).
+  # Chave: nome do check do Vulcan ("speed") ou nome:tipo ('speed:b', entre
+  # aspas). Campos:
+  #   min-vl:    VL mínimo da flag para contar (obrigatório)
+  #   min-flags: quantas flags desse check na janela (padrão 2, máximo 32).
+  #              A ponte guarda só as últimas min-flags de cada check, então
+  #              a memória por jogador é fixa.
+  #   family:    família (padrão = nome do check). Checks da mesma família
+  #              contam como uma só.
+  # Exemplo (NÃO é recomendação; ajuste depois de observar):
+  #   checks:
+  #     speed:      { min-vl: 10, min-flags: 2, family: movimento }
+  #     fly:        { min-vl: 8,  min-flags: 2, family: movimento }
+  #     'killaura:a': { min-vl: 5, min-flags: 3, family: combate }
+  #     reach:      { min-vl: 6,  min-flags: 3, family: combate }
+  checks: {}
 
-# Proteções de teleporte, respawn e troca de mundo. Durante a proteção, flag e
-# punição são barradas (o Vulcan costuma gerar flags falsas logo após mudanças
-# bruscas de posição).
-# A proteção de ENTRADA/RECONEXÃO não fica aqui: o ZwoPingState responde
-# UNKNOWN logo após o join até ter amostras suficientes, o que já barra as
-# punições. Assim a lógica não é duplicada.
+sequence:
+  # Validade do histórico, contada a partir do 1º kick (s, m, h, d, w).
+  validity: 7d
+  # Duração do ban temporário da 3ª ocorrência (limitada pelo
+  # limits.max-tempban-days do ModPanel).
+  ban-duration: 24h
+  ban-reason: 'Uso de trapaça detectado pelo anticheat (3ª ocorrência)'
+  # Nome que aparece no histórico do ModPanel como quem aplicou.
+  actor: 'ZwoVulcanBridge'
+  # Sem resposta do ModPanel nesse tempo = resultado incerto (vai para
+  # revisão; a ponte não tenta outro ban).
+  ban-timeout-seconds: 30
+
+messages:
+  kick-1: "&cVocê foi desconectado pelo anticheat.\n&7Comportamento irregular detectado. Se acontecer de novo, nova desconexão; na terceira vez, ban temporário."
+  kick-2: "&cVocê foi desconectado pelo anticheat pela 2ª vez.\n&7Na próxima ocorrência você será banido temporariamente."
+
+# Proteções: flags durante a proteção não contam, e a ação é cancelada se a
+# proteção estiver ativa no momento de agir.
+# A proteção de ENTRADA fica no ZwoPingState: ele responde UNKNOWN logo após
+# o join até ter amostras suficientes, o que já descarta as flags.
 protections:
   teleport-seconds: 3
   respawn-seconds: 3
   world-change-seconds: 3
 
 bedrock:
-  # Jogadores Bedrock (Geyser/Floodgate) nunca recebem punição automática do
-  # Vulcan. As flags deles seguem normais, para a staff ver os alertas.
-  exclude-from-punishments: true
-  # Prefixos de nome usados pelo Floodgate (caso a API não esteja disponível).
+  # Prefixos de nome do Floodgate. Nome com prefixo = Bedrock (fora da
+  # automação). Nome SEM prefixo não prova nada: Java só é confirmado pela
+  # API do Floodgate.
   name-prefixes: ["."]
+  # Só para servidores SEM Geyser/Floodgate: considera Java toda conta sem
+  # sinal de Bedrock. Com Geyser na rede, deixe false (sem a API do
+  # Floodgate não dá para separar Java de Bedrock com segurança).
+  assume-java-without-floodgate: false
 
 alerts:
-  # Avisar a staff online (permissão zwovulcanbridge.alerts) a cada punição
-  # do Vulcan, liberada ou bloqueada. Nunca por flag.
+  # Avisar a staff online (permissão zwovulcanbridge.alerts) a cada decisão.
   notify-staff: true
-  # Gravar cada punição do Vulcan em plugins/ZwoVulcanBridge/punicoes.log.
+  # Gravar cada decisão em plugins/ZwoVulcanBridge/decisoes.log (nunca por flag).
   audit-log: true
-  # Conferir, ao ligar e no /zvb reload, se o config do Vulcan tem comandos
-  # que banem IP e avisar no console. A ponte não altera o config do Vulcan.
-  check-vulcan-commands: true
+  # Ao ligar e no /zvb reload: avisar se o Vulcan tem checks puníveis ou
+  # comandos que banem IP. A ponte não altera o config do Vulcan.
+  check-vulcan-config: true

@@ -1,101 +1,136 @@
-# Instalação
+# Instalação, ativação e rollback
 
-Requisitos: **Paper 1.21.11**, **Java 21**, **Vulcan 2.9.7.x** com um **packetevents compatível**. Para o ban
-só por perfil: **ModPanel com o comando `/mpbanperfil`** (ver o item 4).
+Requisitos: **Paper 1.21.11**, **Java 21**, **Vulcan 2.9.7.29** com **packetevents compatível**, **ModPanel 3.1.0**
+e, na rede com Geyser, **Floodgate** instalado no Paper (backend), não só no Velocity.
 
-> No teste local, o Vulcan 2.9.7.29 **não funciona com packetevents 2.12.1**: todo jogador é desconectado
-> com "Invalid packet" (`NoSuchFieldError: PacketType$Play$Client PUNCH`). Com o packetevents 2.14.0 funcionou.
-> Confira a versão que está no servidor antes de atualizar o Vulcan.
+> No teste local, o Vulcan 2.9.7.29 **não funciona com packetevents 2.12.1** (todo jogador sai com "Invalid
+> packet"). Com o packetevents 2.14.0 funcionou. Confira a versão antes de atualizar.
+
+> **Não ative punições (`mode: ENFORCE`) em produção** sem antes passar pelo período de observação (item 6).
 
 ## 1. Arquivos
 
-Copie para `plugins/` (estão em [`dist/`](../dist)):
+Estão em [`dist/`](../dist), separados (sem ZIP):
 
-| JAR | Obrigatório | Função |
-| --- | --- | --- |
-| `ZwoVulcanBridge-2.0.0.jar` | sim | Filtro de lag para as punições do Vulcan. Contém a API `PingStateProvider`. |
-| `ZwoPingState-1.0.0.jar` | sim | Provedor da qualidade de conexão. Não pune ninguém. |
+| JAR | Função |
+| --- | --- |
+| `ZwoVulcanBridge-3.0.0.jar` | Escalada do anticheat. Contém a API `PingStateProvider`. |
+| `ZwoPingState-1.0.0.jar` | Provedor da qualidade de conexão (o mesmo 1.0.0 de antes). Não pune ninguém. |
+| `ModPanel-3.1.0.jar` | Painel de moderação com a `ProfileBanApi` (ban temporário só do perfil). Substitui o SerpensModPanel 2.0.0 / ModPanel 3.0.0. |
 
-A ordem de carregamento é automática: o ZwoPingState declara `softdepend: [ZwoVulcanBridge]` e a ponte
-declara `softdepend: [Vulcan]`.
+Ordem de carregamento automática: ZwoPingState `softdepend: [ZwoVulcanBridge]`; a ponte
+`softdepend: [Vulcan, floodgate, ModPanel]`.
 
-## 2. Quem pune
+## 2. Passo a passo
 
-**Quem pune é o Vulcan**, pelos `punishment-commands` de cada check no `plugins/Vulcan/config.yml`. A ponte
-não kicka nem bane ninguém. Ela só cancela a punição do Vulcan (`VulcanPunishEvent`) quando:
-
-- a conexão do jogador não está `STABLE` (ping alto, picos, oscilação, servidor instável, dados insuficientes
-  ou vencidos);
-- o provedor (ZwoPingState) não está disponível;
-- houve flag com lag nos últimos `filter.recent-lag-seconds` (o VL daquele momento foi inflado por lag);
-- o jogador é Bedrock;
-- o jogador acabou de teleportar, renascer ou trocar de mundo.
-
-Quando bloqueia (no modo ENFORCE), a ponte zera o VL daquele check no Vulcan, para o lag não ficar "guardado".
-
-## 3. Primeiro boot
-
-Reinicie o servidor (não use `/reload`). No console devem aparecer:
+1. **Backup** de `plugins/ZwoVulcanBridge/`, `plugins/Vulcan/config.yml`, da pasta do painel
+   (`plugins/SerpensModPanel/` ou `plugins/ModPanel/`) e do banco do painel, se for MySQL.
+2. Pare o servidor (não use `/reload`).
+3. **ModPanel:** remova o JAR antigo do painel e coloque `ModPanel-3.1.0.jar`. Vindo do SerpensModPanel 2.0.0, o
+   ModPanel importa sozinho o config e o histórico na primeira inicialização (ver README do ModPanel). Não apague
+   a pasta antiga até conferir.
+4. **Ponte:** troque `ZwoVulcanBridge-2.0.0.jar` (ou 1.0.0) por `ZwoVulcanBridge-3.0.0.jar`. **Renomeie** o
+   `plugins/ZwoVulcanBridge/config.yml` antigo (as chaves mudaram) para gerar o novo. `punicoes.log` e
+   `strikes.yml` antigos não são mais usados.
+5. **Vulcan:** em `plugins/Vulcan/config.yml`, deixe **todos os checks com `punishable: false`**. A ponte
+   continua recebendo as flags (confirmado no teste: 364 flags, 0 punições do Vulcan). Se algum check ainda
+   punir, a ponte cancela a punição e avisa no console e no `/zvb status`.
+6. Inicie o servidor. No console devem aparecer:
 
 ```
-[ZwoVulcanBridge] Vulcan 2.9.7.29 conectado: filtrando punições e flags.
-[ZwoVulcanBridge] Modo: OBSERVE (observação: TODA punição do Vulcan é bloqueada e só registrada)
+[ZwoVulcanBridge] Floodgate detectado: contas Java/Bedrock serão confirmadas pela API.
+[ZwoVulcanBridge] Vulcan 2.9.7.29 conectado: lendo flags (VulcanFlagEvent) ...
+[ZwoVulcanBridge] Modo: OBSERVE ...
+[ZwoVulcanBridge] Checks aprovados: 0 em 0 família(s) ...
+[ZwoVulcanBridge] ModPanel: ...
 [ZwoPingState] Provedor PingStateProvider registrado para a ZwoVulcanBridge.
 ```
 
-Se aparecer `O config do Vulcan tem N comando(s) que podem banir IP`, veja o item 4.
+7. Rode `/zvb status`. Com o config novo, **"Automação: BLOQUEADA — nenhum check aprovado"** é o esperado: a lista
+   `evidence.checks` vem vazia de propósito.
 
-## 4. Ban só por perfil (nunca IP)
+## 3. O que a automação exige
 
-O `/mpban` e o `/mptempban` do ModPanel **também banem o último IP** do jogador quando o IP tem poucas contas.
-Nos `punishment-commands` do Vulcan use o comando novo do ModPanel, que bane **só o perfil/UUID**:
+`/zvb status` lista cada bloqueio. A automação só age quando **todos** estão ok:
+
+- checks aprovados em pelo menos 2 famílias diferentes (`evidence.checks`);
+- Vulcan conectado (escuta do `VulcanFlagEvent`);
+- provedor de conexão disponível (ZwoPingState ligado);
+- ModPanel 3.1.0+ com a `ProfileBanApi` (versão 1). ModPanel ausente, desligado ou antigo = **BLOQUEADA**, com o
+  motivo no status. Nunca há fallback para `/mpban`, `/mptempban` ou `/ban-ip`.
+
+Mesmo com tudo ok:
+
+- **Bedrock** fica fora (Floodgate, UUID Bedrock ou prefixo do nome).
+- Conta que **não dá para confirmar como Java** (Floodgate ausente/com erro) gera só registro para revisão.
+  `bedrock.assume-java-without-floodgate: true` é só para servidor **sem** Geyser; com Geyser deixe `false`.
+
+## 4. Escolher os checks aprovados
+
+Durante a observação, veja quais checks aparecem nas linhas `[OBSERVE]` do `decisoes.log` e nos alertas do
+Vulcan para quem realmente trapaceia, e quais aparecem em jogadores legítimos. Aprove só checks de **alta
+confiança**, com VL mínimo alto, e agrupe em famílias:
 
 ```yaml
-punishment-commands:
-  - 'mpbanperfil %player% [Vulcan] Unfair Advantage'
+evidence:
+  window-seconds: 120
+  min-families: 2
+  checks:
+    speed:        { min-vl: 10, min-flags: 2, family: movimento }
+    fly:          { min-vl: 8,  min-flags: 2, family: movimento }
+    'killaura:a': { min-vl: 5,  min-flags: 3, family: combate }
+    reach:        { min-vl: 6,  min-flags: 3, family: combate }
 ```
 
-Alternativa sem o painel: o ban nativo do Paper também é só de perfil (`minecraft:ban %player% <motivo>`).
-Para kick, mantenha `kick %player% ...`.
+Esses valores são **exemplo**, não recomendação. Problemas de config (check duplicado, `min-vl` inválido,
+tipo inválido) aparecem no console e no `/zvb status`. Aplique com `/zvb reload` (as evidências em andamento
+são descartadas).
 
-Ao ligar e no `/zvb reload`, a ponte lê o config do Vulcan e **avisa** (console e `/zvb status`) se encontrar
-`mpban`, `mptempban`, `mpipban`, `ban-ip`, `banip` ou similares. Ela não altera o config do Vulcan.
+## 5. Sequência
 
-## 5. Conferência
+| Ocorrência (por UUID, dentro de `sequence.validity` = 7d a partir do 1º kick) | Ação |
+| --- | --- |
+| 1ª | kick com `messages.kick-1` |
+| 2ª, em outra sessão | kick com `messages.kick-2` |
+| 3ª, em outra sessão | ban temporário de `sequence.ban-duration` (24h) só do perfil, pelo ModPanel |
+| depois do ban (aplicado ou em revisão) | só registro para revisão |
 
-```
-/zvb status        -> Vulcan "conectado", provedor "ZwoPingState 1.0.0", contadores de punições
-/pingstate stats   -> custo da coleta, idade das amostras
-/pingstate <nick>  -> estado do jogador
-/zvb jogador <nick>-> conexão, proteção e se uma punição do Vulcan passaria agora
-```
+- Kick só conta com a desconexão confirmada. Kick cancelado por outro plugin não conta.
+- Ban com falha, timeout (`ban-timeout-seconds`) ou resposta incerta vai para **revisão** e não é repetido. Confira
+  no ModPanel e use `/zvb limpar <nick>` se quiser que a sequência recomece.
+- `/zvb limpar` não desfaz bans: para isso, `/mpunban`.
 
 ## 6. Período de observação (obrigatório)
 
-Deixe `mode: OBSERVE` (padrão) por alguns dias. Nesse modo a ponte:
+Deixe `mode: OBSERVE` (padrão) por alguns dias, já com os checks que pretende aprovar. Nesse modo a ponte:
 
-- **bloqueia todas as punições do Vulcan** (ninguém é kickado nem banido pelo Vulcan);
-- grava cada uma em `plugins/ZwoVulcanBridge/punicoes.log` como "BLOQUEADA (observação; teria passado)" ou
-  "BLOQUEADA (conexão instável)", etc.;
-- avisa a staff com a permissão `zwovulcanbridge.alerts`;
-- não mexe nas flags nem no VL: alertas e setbacks do Vulcan continuam normais.
+- junta as evidências normalmente e grava em `plugins/ZwoVulcanBridge/decisoes.log` cada ocorrência como
+  `[OBSERVE] ocorrência válida; teria aplicado: 1º kick ...`;
+- **não** kicka, não bane e **não** altera o `historico.yml` (o "teria aplicado" sempre parte do histórico real);
+- avisa a staff com `zwovulcanbridge.alerts`.
 
-Revise o `punicoes.log`. As linhas "teria passado" são as punições que o Vulcan aplicaria em ENFORCE.
+Revise as linhas `[OBSERVE]`: se aparecer alguém legítimo, aumente `min-vl`/`min-flags` ou tire o check.
 
 ## 7. Ativar (somente quando decidido)
 
-No `plugins/ZwoVulcanBridge/config.yml`: `mode: ENFORCE` e `/zvb reload`. Bedrock continua excluído.
+`mode: ENFORCE` no `plugins/ZwoVulcanBridge/config.yml` e `/zvb reload`. Confira em `/zvb status` que a linha
+"Automação" está **liberada**.
 
-> `filter.cancel-flags` fica `false` de propósito: com `false`, a flag segue inteira no Vulcan (alerta para a
-> staff e o tratamento normal do Vulcan, como o setback) e só a **punição** é filtrada. Cancelar a flag
-> provavelmente também cancela o setback, e quem forja lag andaria livre. Isso **não foi confirmado** no teste
-> local: os bots trapaceiros foram kickados por "flying" pelo vanilla nos dois casos.
+## 8. Rollback
 
-## Atualização a partir da 1.0.0
+**Desligar a automação na hora (sem reiniciar):** `mode: OBSERVE` e `/zvb reload`. Ou esvazie `evidence.checks`.
 
-A ponte 1.0.0 tinha uma escada própria (kick, kick, ban). Na 2.0.0 isso saiu: quem pune é o Vulcan.
+**Voltar para a ponte 2.0.0:**
 
-1. Pare o servidor e troque o JAR.
-2. **Apague ou renomeie** o `plugins/ZwoVulcanBridge/config.yml` antigo, para gerar o novo (as chaves mudaram).
-3. Os arquivos `strikes.yml` e `ocorrencias.log` antigos não são mais usados e podem ser arquivados.
-4. Ajuste os `punishment-commands` do Vulcan (item 4).
+1. Pare o servidor.
+2. Troque `ZwoVulcanBridge-3.0.0.jar` por `ZwoVulcanBridge-2.0.0.jar` (está no histórico do repositório, commit
+   `7b3f5da`, tag `v2.0.0`).
+3. Restaure o `config.yml` da 2.0 do backup. Guarde `historico.yml` e `decisoes.log` (a 2.0 não os usa).
+4. Restaure o `plugins/Vulcan/config.yml` do backup (a 2.0 dependia do Vulcan punir).
+
+**Voltar o painel:** o ModPanel 3.1.0 só **acrescenta** a API, sem mudar o banco. Para voltar ao ModPanel 3.0.0,
+troque o JAR; a ponte 3.0 vai mostrar "ModPanel: INCOMPATÍVEL" e bloquear a automação, sem quebrar nada. Os bans
+já aplicados pela ponte continuam no histórico do painel (origem `API`).
+
+**Remover tudo:** tire os JARs da ponte e do ZwoPingState. O Vulcan continua só detectando enquanto os checks
+estiverem `punishable: false`; restaure o config dele se quiser que ele volte a punir sozinho.

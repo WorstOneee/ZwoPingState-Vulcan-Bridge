@@ -3,25 +3,25 @@ version: '${version}'
 main: br.com.serpens.vulcanbridge.ZwoVulcanBridgePlugin
 api-version: '1.21'
 authors: [Zwo]
-description: Filtro de lag para as punições do Vulcan (só deixa o Vulcan punir com conexão STABLE, via PingStateProvider).
-softdepend: [Vulcan, floodgate]
+description: Escalada do anticheat por UUID (kick, kick, ban temporário só do perfil pelo ModPanel) a partir das flags do Vulcan, só com conexão STABLE (PingStateProvider).
+softdepend: [Vulcan, floodgate, ModPanel]
 
 commands:
   zwovulcanbridge:
     description: Diagnóstico e administração da ZwoVulcanBridge.
-    usage: /zvb [status|jogador|reload]
+    usage: /zvb [status|jogador|historico|limpar|reload]
     aliases: [zvb]
 
 permissions:
   zwovulcanbridge.admin:
-    description: Acesso completo (inclui reload).
+    description: Acesso completo (inclui reload e limpar).
     default: op
     children:
       zwovulcanbridge.staff: true
       zwovulcanbridge.alerts: true
   zwovulcanbridge.staff:
-    description: Ver o diagnóstico da ponte.
+    description: Ver o diagnóstico e o histórico da ponte.
     default: op
   zwovulcanbridge.alerts:
-    description: Receber os avisos de punições do Vulcan liberadas ou bloqueadas.
+    description: Receber os avisos das decisões da ponte.
     default: op
