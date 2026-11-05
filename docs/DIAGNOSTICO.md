@@ -57,23 +57,30 @@ O que observar:
 
 ## ZwoVulcanBridge — `/zvb`
 
-Permissões: `zwovulcanbridge.staff` (ver), `zwovulcanbridge.admin` (reload/limpar),
-`zwovulcanbridge.alerts` (receber avisos).
+Permissões: `zwovulcanbridge.staff` (ver), `zwovulcanbridge.admin` (reload),
+`zwovulcanbridge.alerts` (receber avisos de punições do Vulcan liberadas/bloqueadas).
 
-- `/zvb status`: modo, Vulcan conectado e por qual evento, provedor, contadores (flags recebidas, descartadas
-  por conexão/proteção, ocorrências, punições internas do Vulcan bloqueadas), e se o ban automático está ativo.
-- `/zvb jogador <nick>`: conexão que a ponte recebe, sequência atual (x/3), proteção ativa (teleporte/respawn),
-  último motivo de descarte, última ocorrência, kicks válidos.
-- `/zvb strikes <nick|uuid>`: histórico por perfil (também offline).
-- `/zvb limpar <nick|uuid>`: apaga o histórico (fica registrado no `ocorrencias.log`).
-- `/zvb reload`: recarrega o config (troca de evento do Vulcan refaz o hook).
+- `/zvb status`: modo, Vulcan conectado, provedor, flags vistas, punições do Vulcan liberadas/bloqueadas por
+  motivo (observação, instável, desconhecida, lag recente, sem provedor, proteção, Bedrock), quantas vezes o VL
+  foi zerado e se o config do Vulcan tem comandos que banem IP.
+- `/zvb jogador <nick>`: conexão que a ponte recebe, se uma punição do Vulcan **passaria agora**, proteção
+  ativa (teleporte/respawn), flags com lag nesta sessão e as últimas decisões.
+- `/zvb reload`: recarrega o config e confere de novo os comandos do Vulcan.
+
+Cada punição do Vulcan (nunca cada flag) vira uma linha em `plugins/ZwoVulcanBridge/punicoes.log`, no máximo uma
+por jogador e check a cada 30 s:
+
+```
+[2026-11-04 22:43:40] Punição do Vulcan LIBERADA: zfs0 (30dad699-...) — motion (E) VL 3/3 — conexão STABLE/OK — modo ENFORCE
+```
 
 ## Problemas comuns
 
 | Sintoma | Causa provável |
 | --- | --- |
-| `Flags recebidas: 0` com o Vulcan alertando | `listen-event: POST_FLAG` no Vulcan 2.9.7.29 → use `FLAG` |
-| `Provedor de conexão: nenhum provedor registrado` | ZwoPingState ausente/desligado → **todas as flags são descartadas** |
+| `Provedor de conexão: nenhum provedor registrado` | ZwoPingState ausente/desligado → **todas as punições do Vulcan são bloqueadas** |
+| Aviso "comando(s) que podem banir IP" | troque `mpban`/`ban-ip` por `mpbanperfil %player% <motivo>` no config do Vulcan |
+| Jogador voando/andando livre com ping alto | com `filter.cancel-flags: true` o Vulcan provavelmente não dá setback nessas flags; deixe `false` |
 | Todos UNKNOWN / "dados vencidos" | travada longa ou coleta parada; veja `/pingstate stats` |
 | Todos UNSTABLE / "servidor instável" | TPS/MSPT ruins ou travadas recentes; veja a linha "Servidor" |
 | Jogadores desconectados com "Invalid packet" | packetevents incompatível com o Vulcan (não é destes plugins) |

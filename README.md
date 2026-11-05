@@ -6,14 +6,15 @@ injusta do anticheat, com custo baixo no servidor.
 | Plugin | Papel |
 | --- | --- |
 | **ZwoPingState** | Responde, por UUID, `STABLE`, `UNSTABLE` ou `UNKNOWN` sobre a conexão do jogador. **Não pune ninguém.** |
-| **ZwoVulcanBridge** | Recebe as flags do Vulcan e só as avalia quando a conexão é `STABLE`. Escada: kick → kick (outra sessão) → ban **por perfil** na 3ª ocorrência válida. **Nunca bane IP.** Começa em modo **observação**. |
+| **ZwoVulcanBridge** | Filtro de lag: **quem pune é o Vulcan**; a ponte só deixa a punição do Vulcan passar quando a conexão é `STABLE` e cancela nos outros casos (lag, sem provedor, Bedrock, teleporte/respawn). Avisa se o Vulcan estiver configurado com comando que bane IP. Começa em modo **observação** (bloqueia tudo e só registra). |
 
 ```
-Vulcan ──flag──▶ ZwoVulcanBridge ──connection(UUID)──▶ ZwoPingState (O(1), memória)
-                    │  STABLE?  não → descarta a sequência de flags
-                    │  sim → flag alta e repetida? → ocorrência
-                    ▼
-             OBSERVE: só registra/avisa   |   ENFORCE: kick, kick, ban por perfil
+Vulcan ──VL máximo──▶ VulcanPunishEvent ──▶ ZwoVulcanBridge ──connection(UUID)──▶ ZwoPingState (O(1), memória)
+                                              │ STABLE, sem lag recente, Java, sem proteção?
+                                              │   não → cancela a punição (e zera o VL do check)
+                                              ▼   sim → OBSERVE: cancela e registra "teria passado"
+                                                        ENFORCE: o Vulcan executa os punishment-commands
+                                                                 (ex.: /mpbanperfil %player% ... = ban só por perfil)
 ```
 
 - Instalação: [docs/INSTALACAO.md](docs/INSTALACAO.md)
@@ -45,18 +46,20 @@ Vulcan ──flag──▶ ZwoVulcanBridge ──connection(UUID)──▶ ZwoPi
 
 ## Como a ponte decide
 
-1. Bedrock → ignorado (nunca punido automaticamente).
-2. Check não punível no Vulcan ou ignorado no config → ignorado.
-3. Proteção de teleporte/respawn/troca de mundo → sequência descartada.
-4. Conexão diferente de `STABLE` **ou provedor ausente/desligado** → sequência descartada.
-5. Flag "alta" = VL ≥ maxVl do check no Vulcan (`min-vl-ratio: 1.0`). 3 flags altas em 60 s → ocorrência.
-6. No máximo uma ocorrência por sessão. Kicks só contam em sessões distintas. O modo observação nunca
-   alimenta o modo de punição.
-7. As punições internas do Vulcan são bloqueadas (`cancel-vulcan-punishments: true`) para que tudo passe
-   por aqui.
+1. Bedrock → punição do Vulcan cancelada (nunca punido automaticamente). As flags seguem para a staff ver.
+2. Proteção de teleporte/respawn/troca de mundo → cancelada.
+3. Conexão diferente de `STABLE` **ou provedor ausente/desligado** → cancelada.
+4. Flag com lag nos últimos `filter.recent-lag-seconds` (120 s) → cancelada: o VL foi inflado por lag.
+5. Senão: em `ENFORCE` a punição do Vulcan passa; em `OBSERVE` (padrão) é cancelada e registrada como "teria
+   passado" em `punicoes.log`.
+6. Ao cancelar por lag/proteção/Bedrock em `ENFORCE`, o VL do check é zerado no Vulcan.
+7. As flags **não** são canceladas por padrão (`filter.cancel-flags: false`): a flag segue inteira no Vulcan
+   (alerta e setback) e só a punição é filtrada. Cancelar a flag provavelmente também cancela o setback, e quem
+   forja lag andaria livre (não confirmado no teste local).
 
-> **Atenção:** o `/mpban` do ModPanel/SerpensModPanel também bane o último IP. A ponte recusa esse comando.
-> Sem um comando de ban somente por perfil, a 3ª ocorrência fica **pendente para revisão manual**.
+> **Ban só por perfil:** o `/mpban` do ModPanel também bane o último IP. Nos `punishment-commands` do Vulcan use
+> `/mpbanperfil %player% <motivo>` (comando novo do ModPanel). A ponte avisa se achar comandos de IP no config
+> do Vulcan.
 
 ## Compilar
 
@@ -64,7 +67,7 @@ Vulcan ──flag──▶ ZwoVulcanBridge ──connection(UUID)──▶ ZwoPi
 ./gradlew release
 ```
 
-Gera `build/release/ZwoVulcanBridge-1.0.0.jar` e `build/release/ZwoPingState-1.0.0.jar`. Os JARs já compilados
+Gera `build/release/ZwoVulcanBridge-2.0.0.jar` e `build/release/ZwoPingState-1.0.0.jar`. Os JARs já compilados
 desta versão estão em [`dist/`](dist). O ZwoPingState
 compila contra o JAR da ponte (`compileOnly`) e **não embute** a interface `PingStateProvider`.
 
@@ -72,7 +75,7 @@ compila contra o JAR da ponte (`compileOnly`) e **não embute** a interface `Pin
 
 ```
 zwo-vulcan-bridge/   API br.com.serpens.vulcanbridge.api (PingStateProvider, ConnectionState...)
-                     + plugin da ponte (core/ sem Bukkit, testável)
+                     + filtro de punições do Vulcan (core/ sem Bukkit, testável)
 zwo-ping-state/      plugin do provedor (core/ sem Bukkit, testável)
 docs/                instalação, diagnóstico, validação
 dist/                JARs prontos desta versão

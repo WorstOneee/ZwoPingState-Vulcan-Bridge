@@ -1,30 +1,25 @@
 package br.com.serpens.vulcanbridge;
 
 import br.com.serpens.vulcanbridge.api.ConnectionStatus;
+import br.com.serpens.vulcanbridge.core.BridgeMode;
+import br.com.serpens.vulcanbridge.core.Gate;
+import br.com.serpens.vulcanbridge.core.GateReason;
 import br.com.serpens.vulcanbridge.core.PlayerSession;
-import br.com.serpens.vulcanbridge.core.Strike;
 import org.bukkit.Bukkit;
-import org.bukkit.OfflinePlayer;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabExecutor;
 import org.bukkit.entity.Player;
 
-import java.time.Instant;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.UUID;
 
-/** /zvb — diagnóstico e administração da ponte (somente staff). */
+/** /zvb — diagnóstico da ponte (somente staff). Só lê contadores prontos. */
 final class BridgeCommand implements TabExecutor {
 
     private static final String PERM_VIEW = "zwovulcanbridge.staff";
     private static final String PERM_ADMIN = "zwovulcanbridge.admin";
-    private static final DateTimeFormatter TS =
-            DateTimeFormatter.ofPattern("dd/MM HH:mm").withZone(ZoneId.systemDefault());
 
     private final ZwoVulcanBridgePlugin plugin;
 
@@ -42,8 +37,6 @@ final class BridgeCommand implements TabExecutor {
         switch (sub) {
             case "status" -> status(sender);
             case "jogador", "player" -> player(sender, args);
-            case "strikes", "historico" -> strikes(sender, args);
-            case "limpar", "clear" -> clear(sender, args);
             case "reload" -> {
                 if (!sender.hasPermission(PERM_ADMIN)) {
                     send(sender, "&cSem permissão.");
@@ -59,31 +52,42 @@ final class BridgeCommand implements TabExecutor {
 
     private void help(CommandSender s, String label) {
         send(s, "&6ZwoVulcanBridge &7— comandos:");
-        send(s, "&e/" + label + " status &7— estado geral da ponte");
-        send(s, "&e/" + label + " jogador <nick> &7— sequência, conexão e proteções do jogador");
-        send(s, "&e/" + label + " strikes <nick|uuid> &7— histórico de ocorrências");
-        send(s, "&e/" + label + " limpar <nick|uuid> &7— apaga o histórico (admin)");
+        send(s, "&e/" + label + " status &7— estado geral do filtro");
+        send(s, "&e/" + label + " jogador <nick> &7— conexão, proteção e últimas decisões do jogador");
         send(s, "&e/" + label + " reload &7— recarrega o config.yml (admin)");
     }
 
     private void status(CommandSender s) {
         BridgeSettings st = plugin.settings();
         VulcanHook v = plugin.vulcan();
-        send(s, "&6ZwoVulcanBridge " + plugin.getPluginMeta().getVersion());
-        send(s, "&7Modo: " + (st.mode() == br.com.serpens.vulcanbridge.core.BridgeMode.OBSERVE
-                ? "&eOBSERVE &7(ninguém é punido)" : "&cENFORCE &7(punições ativas)"));
-        send(s, "&7Vulcan: " + (v.active() ? "&aconectado &7via " + v.eventName() : "&cdesconectado")
-                + " &8| &7punições internas do Vulcan: " + (st.cancelVulcanPunishments() ? "&ebloqueadas" : "&cliberadas"));
+        Gate g = plugin.gate();
+        send(s, "&6ZwoVulcanBridge " + plugin.getPluginMeta().getVersion() + " &7— filtro de lag para as punições do Vulcan");
+        send(s, "&7Modo: " + (st.mode() == BridgeMode.OBSERVE
+                ? "&eOBSERVE &7(toda punição do Vulcan é bloqueada e registrada)"
+                : "&cENFORCE &7(o Vulcan pune quando a conexão está STABLE)")
+                + " &8| &7cancelar flags com lag: &f" + (st.policy().cancelFlags() ? "sim" : "não")
+                + " &8| &7lag recente: &f" + (st.policy().recentLagMillis() / 1000) + " s");
+        send(s, "&7Vulcan: " + (v.active() ? "&aconectado &7(" + v.version() + ")" : "&cdesconectado — nada é filtrado")
+                + " &8| &7VL zerado após bloqueio: &f" + v.vlResets() + " &8| &7erros de leitura: &f" + v.extractionErrors());
         send(s, "&7Provedor de conexão: " + (plugin.provider().available() ? "&a" : "&c") + plugin.provider().describe()
                 + " &8| &7falhas: &f" + plugin.provider().failures());
-        send(s, "&7Flags recebidas: &f" + v.flagsReceived() + " &8| &7avaliadas: &f" + plugin.engine().flagsSeen()
-                + " &8| &7ocorrências: &f" + plugin.engine().occurrences());
-        send(s, "&7Flags descartadas: conexão &f" + plugin.engine().flagsDiscardedConnection()
-                + " &7| proteção &f" + plugin.engine().flagsDiscardedGrace()
-                + " &8| &7sequências descartadas: &f" + plugin.engine().sequencesDiscarded());
-        send(s, "&7Punições do Vulcan bloqueadas: &f" + v.punishCancelled() + " &8| &7erros de leitura: &f" + v.extractionErrors());
-        send(s, "&7Sessões ativas: &f" + plugin.sessions().size() + " &8| &7perfis com histórico: &f" + plugin.ledger().size());
-        send(s, "&7Ban automático: " + (st.banVerdict().allowed() ? "&a" + st.banCommand() : "&e" + st.banVerdict().reason()));
+        send(s, "&7Flags: &f" + g.flagsSeen() + " &7vistas | &f" + g.flagsCancelled() + " &7canceladas por lag/proteção"
+                + (st.mode() == BridgeMode.OBSERVE ? " | &f" + g.flagsWouldCancel() + " &7seriam canceladas" : ""));
+        send(s, "&7Punições do Vulcan: &f" + g.punishSeen() + " &7| liberadas &f" + g.punishAllowed()
+                + " &7| bloqueadas &f" + g.punishBlockedTotal());
+        send(s, "&7  bloqueios: observação &f" + g.punishBlocked(GateReason.OBSERVE_MODE)
+                + " &7| instável &f" + g.punishBlocked(GateReason.CONNECTION_UNSTABLE)
+                + " &7| desconhecida &f" + g.punishBlocked(GateReason.CONNECTION_UNKNOWN)
+                + " &7| lag recente &f" + g.punishBlocked(GateReason.RECENT_LAG)
+                + " &7| sem provedor &f" + g.punishBlocked(GateReason.PROVIDER_UNAVAILABLE)
+                + " &7| proteção &f" + g.punishBlocked(GateReason.PROTECTION)
+                + " &7| Bedrock &f" + g.punishBlocked(GateReason.BEDROCK));
+        send(s, "&7Sessões ativas: &f" + plugin.sessions().size());
+        List<String> ip = plugin.vulcanIpBanCommands();
+        if (!ip.isEmpty()) {
+            send(s, "&cAtenção: o config do Vulcan tem comando(s) que banem IP: &f" + String.join(" &8| &f", ip)
+                    + " &7— use &f/mpbanperfil %player% <motivo>");
+        }
     }
 
     private void player(CommandSender s, String[] args) {
@@ -93,7 +97,7 @@ final class BridgeCommand implements TabExecutor {
         }
         Player p = Bukkit.getPlayerExact(args[1]);
         if (p == null) {
-            send(s, "&cJogador offline. Para o histórico use /zvb strikes " + args[1]);
+            send(s, "&cJogador offline.");
             return;
         }
         PlayerSession session = plugin.sessions().get(p.getUniqueId());
@@ -102,78 +106,29 @@ final class BridgeCommand implements TabExecutor {
             return;
         }
         long now = System.currentTimeMillis();
-        PlayerSession.View view = session.view();
         ConnectionStatus c = plugin.provider().status(p.getUniqueId());
-        send(s, "&6" + p.getName() + " &7(" + p.getUniqueId() + ")" + (session.bedrock() ? " &b[Bedrock: excluído]" : ""));
-        send(s, "&7Conexão: " + color(c) + c.state() + " &7— " + c.reason().description());
-        send(s, "&7Sequência atual: &f" + view.sequence() + "/" + plugin.settings().policy().requiredHighFlags()
-                + " &8| &7ocorrência nesta sessão: &f" + (view.occurrenceThisSession() ? "sim" : "não"));
+        send(s, "&6" + p.getName() + " &7(" + p.getUniqueId() + ")" + (session.bedrock() ? " &b[Bedrock: nunca punido]" : ""));
+        send(s, "&7Conexão: " + color(c) + c.state() + " &7— " + c.reason().description()
+                + " &8| &7punição do Vulcan agora: " + (wouldPass(session, c, now) ? "&cpassaria" : "&abloqueada"));
         send(s, "&7Proteção ativa: " + (session.inGrace(now)
                 ? "&e" + session.graceCause() + " (" + (session.graceUntilMillis() - now) + " ms)" : "&fnão"));
-        send(s, "&7Sequências descartadas: &f" + view.discardedSequences()
-                + (view.lastDiscardReason().isEmpty() ? "" : " &8| &7último motivo: &f" + view.lastDiscardReason()
-                + " &7(" + ((now - view.lastDiscardAtMillis()) / 1000) + "s atrás)"));
-        if (!view.lastOccurrence().isEmpty()) {
-            send(s, "&7Última ocorrência: &f" + view.lastOccurrence());
-        }
-        send(s, "&7Kicks válidos (" + plugin.settings().mode() + "): &f"
-                + plugin.ledger().validKicks(p.getUniqueId(), plugin.settings().mode(), now)
-                + "/" + plugin.settings().kicksBeforeBan());
+        send(s, "&7Flags filtradas nesta sessão: &f" + session.flagsFiltered()
+                + (session.lastFlagReason() == null ? "" : " &8| &7último motivo: &f" + session.lastFlagReason().description()
+                + " &7(" + ((now - session.lastFlagAtMillis()) / 1000) + "s atrás)"));
+        send(s, "&7Punições do Vulcan nesta sessão: liberadas &f" + session.punishmentsAllowed()
+                + " &7| bloqueadas &f" + session.punishmentsBlocked()
+                + (session.lastPunishReason() == null ? "" : " &8| &7última: &f" + session.lastPunishReason().description()));
     }
 
-    private void strikes(CommandSender s, String[] args) {
-        if (args.length < 2) {
-            send(s, "&cUso: /zvb strikes <nick|uuid>");
-            return;
-        }
-        UUID id = resolve(args[1]);
-        if (id == null) {
-            send(s, "&cJogador desconhecido: " + args[1]);
-            return;
-        }
-        List<Strike> list = plugin.ledger().history(id);
-        send(s, "&6Histórico de " + args[1] + " &7(" + id + "): &f" + list.size() + " registro(s)");
-        for (Strike st : list) {
-            send(s, "&8- &7" + TS.format(Instant.ofEpochMilli(st.atMillis())) + " &f" + st.action() + " &7["
-                    + st.mode() + "] &f" + st.check() + " &8(sessão " + st.sessionKey().substring(0, 8) + ")");
-        }
-    }
-
-    private void clear(CommandSender s, String[] args) {
-        if (!s.hasPermission(PERM_ADMIN)) {
-            send(s, "&cSem permissão.");
-            return;
-        }
-        if (args.length < 2) {
-            send(s, "&cUso: /zvb limpar <nick|uuid>");
-            return;
-        }
-        UUID id = resolve(args[1]);
-        if (id == null) {
-            send(s, "&cJogador desconhecido: " + args[1]);
-            return;
-        }
-        if (plugin.ledger().clear(id)) {
-            plugin.storage().saveStrikesAsync(plugin.ledger());
-            plugin.storage().audit("Histórico de " + args[1] + " (" + id + ") apagado por " + s.getName());
-            send(s, "&aHistórico apagado.");
-        } else {
-            send(s, "&7Nada para apagar.");
-        }
-    }
-
-    private static UUID resolve(String input) {
-        try {
-            return UUID.fromString(input);
-        } catch (IllegalArgumentException ignored) {
-            // não é UUID
-        }
-        Player online = Bukkit.getPlayerExact(input);
-        if (online != null) {
-            return online.getUniqueId();
-        }
-        OfflinePlayer cached = Bukkit.getOfflinePlayerIfCached(input);
-        return cached == null ? null : cached.getUniqueId();
+    private boolean wouldPass(PlayerSession session, ConnectionStatus c, long now) {
+        BridgeSettings st = plugin.settings();
+        boolean recentLag = !st.policy().cancelFlags() && st.policy().recentLagMillis() > 0
+                && session.lastLagFlagAtMillis() != 0 && now - session.lastLagFlagAtMillis() < st.policy().recentLagMillis();
+        return st.mode() == BridgeMode.ENFORCE
+                && !(session.bedrock() && st.policy().excludeBedrock())
+                && !session.inGrace(now)
+                && !recentLag
+                && c.state() == br.com.serpens.vulcanbridge.api.ConnectionState.STABLE;
     }
 
     private static String color(ConnectionStatus c) {
@@ -194,9 +149,9 @@ final class BridgeCommand implements TabExecutor {
             return List.of();
         }
         if (args.length == 1) {
-            return filter(List.of("status", "jogador", "strikes", "limpar", "reload"), args[0]);
+            return filter(List.of("status", "jogador", "reload"), args[0]);
         }
-        if (args.length == 2 && !args[0].equalsIgnoreCase("status") && !args[0].equalsIgnoreCase("reload")) {
+        if (args.length == 2 && args[0].equalsIgnoreCase("jogador")) {
             List<String> names = new ArrayList<>();
             for (Player p : Bukkit.getOnlinePlayers()) {
                 names.add(p.getName());

@@ -1,19 +1,24 @@
 package br.com.serpens.vulcanbridge.core;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
 /**
- * Garante que a ponte nunca execute um comando que bana por IP.
+ * Reconhece comandos que banem por IP. A ponte usa isso para conferir os
+ * {@code punishment-commands} do Vulcan na inicialização e avisar a staff: a política do
+ * servidor é ban só por perfil.
  *
- * <p>Atenção: o {@code /mpban} do ModPanel/SerpensModPanel também aplica ban de IP quando o IP
- * tem poucas contas conhecidas ({@code limits.ip-ban-account-limit}, mínimo 2). Por isso ele
- * também é recusado aqui. Use um comando que bana somente o perfil (UUID).</p>
+ * <p>Atenção: o {@code /mpban} e o {@code /mptempban} do ModPanel também banem o último IP
+ * conhecido (quando o IP tem poucas contas). Para ban só por perfil use {@code /mpbanperfil}.</p>
  */
 public final class BanCommandGuard {
 
-    /** Comandos recusados (primeira palavra, sem "/", sem namespace). */
-    public static final Set<String> REFUSED = Set.of(
+    /** Primeira palavra (sem "/", sem namespace) de comandos que podem banir IP. */
+    public static final Set<String> IP_BAN_COMMANDS = Set.of(
             "ban-ip", "banip", "ipban", "mpipban", "tempbanip", "tempipban", "banip-temp",
             // ModPanel / SerpensModPanel: banem também o último IP conhecido
             "mpban", "mptempban");
@@ -21,15 +26,29 @@ public final class BanCommandGuard {
     private BanCommandGuard() {
     }
 
-    public record Verdict(boolean allowed, String reason) {
+    /** true se o comando pode banir por IP. */
+    public static boolean bansIp(String command) {
+        String label = label(command);
+        return label != null && IP_BAN_COMMANDS.contains(label);
     }
 
-    public static Verdict check(String command) {
+    /** Comandos (sem repetição, na ordem) que podem banir por IP. */
+    public static List<String> ipBanCommands(Collection<String> commands) {
+        Set<String> out = new LinkedHashSet<>();
+        for (String c : commands) {
+            if (bansIp(c)) {
+                out.add(c.trim());
+            }
+        }
+        return new ArrayList<>(out);
+    }
+
+    static String label(String command) {
         if (command == null || command.isBlank()) {
-            return new Verdict(false, "comando de ban vazio");
+            return null;
         }
         String first = command.trim();
-        if (first.startsWith("/")) {
+        while (first.startsWith("/")) {
             first = first.substring(1);
         }
         int space = first.indexOf(' ');
@@ -40,13 +59,6 @@ public final class BanCommandGuard {
         if (colon >= 0) {
             first = first.substring(colon + 1);
         }
-        first = first.toLowerCase(Locale.ROOT);
-        if (REFUSED.contains(first)) {
-            return new Verdict(false, "o comando '" + first + "' pode banir por IP e é recusado pela ponte");
-        }
-        if (!command.contains("{uuid}") && !command.contains("{player}")) {
-            return new Verdict(false, "o comando de ban precisa conter {uuid} ou {player}");
-        }
-        return new Verdict(true, "ok");
+        return first.toLowerCase(Locale.ROOT);
     }
 }

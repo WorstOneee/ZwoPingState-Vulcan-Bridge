@@ -5,35 +5,43 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BanCommandGuardTest {
 
     @ParameterizedTest
-    @DisplayName("comandos que podem banir IP são recusados")
+    @DisplayName("comandos que podem banir IP são reconhecidos")
     @ValueSource(strings = {
-            "mpban {player} {reason}", "/mpban {player} x", "mptempban {player} 7d x",
-            "mpipban {player} x", "ban-ip {player}", "minecraft:ban-ip {player}", "essentials:banip {player}",
-            "IPBAN {player}"})
-    void refusesIpCommands(String cmd) {
-        assertFalse(BanCommandGuard.check(cmd).allowed(), cmd);
+            "mpban %player% x", "/mpban %player% x", "mptempban %player% 7d x",
+            "mpipban %player% x", "ban-ip %player%", "minecraft:ban-ip %player%", "essentials:banip %player%",
+            "IPBAN %player%"})
+    void detectsIpCommands(String cmd) {
+        assertTrue(BanCommandGuard.bansIp(cmd), cmd);
+    }
+
+    @ParameterizedTest
+    @DisplayName("ban só de perfil e kick não são marcados")
+    @ValueSource(strings = {
+            "mpbanperfil %player% Anticheat", "minecraft:ban %player% x", "ban %player% x",
+            "kick %player% &c[Vulcan] Unfair Advantage", ""})
+    void profileOnlyIsFine(String cmd) {
+        assertFalse(BanCommandGuard.bansIp(cmd), cmd);
     }
 
     @Test
-    void emptyIsPendingNotAllowed() {
-        assertFalse(BanCommandGuard.check("").allowed());
-        assertFalse(BanCommandGuard.check(null).allowed());
+    void nullIsFine() {
+        assertFalse(BanCommandGuard.bansIp(null));
     }
 
     @Test
-    void requiresTarget() {
-        assertFalse(BanCommandGuard.check("ban fulano").allowed());
-    }
-
-    @Test
-    void acceptsProfileOnlyCommand() {
-        assertTrue(BanCommandGuard.check("minecraft:ban {player} {reason}").allowed());
-        assertTrue(BanCommandGuard.check("mpbanperfil {uuid} {reason}").allowed());
+    @DisplayName("lista os comandos de IP sem repetir")
+    void listsUnique() {
+        List<String> found = BanCommandGuard.ipBanCommands(List.of(
+                "kick %player% x", "mpban %player% x", "mpban %player% x", "mpbanperfil %player% x", "ban-ip %player%"));
+        assertEquals(List.of("mpban %player% x", "ban-ip %player%"), found);
     }
 }
