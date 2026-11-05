@@ -23,7 +23,6 @@ Vulcan (punishable: false) ──VulcanFlagEvent──▶ ZwoVulcanBridge
 
 - Instalação, ativação e rollback: [docs/INSTALACAO.md](docs/INSTALACAO.md)
 - Diagnóstico (`/pingstate`, `/zvb`, `decisoes.log`, `historico.yml`): [docs/DIAGNOSTICO.md](docs/DIAGNOSTICO.md)
-- O que foi testado, custo medido e o que ficou pendente: [docs/VALIDACAO.md](docs/VALIDACAO.md)
 - Configurações comentadas: [ZwoPingState](zwo-ping-state/src/main/resources/config.yml) ·
   [ZwoVulcanBridge](zwo-vulcan-bridge/src/main/resources/config.yml)
 
@@ -79,6 +78,6 @@ no JAR**: em execução as classes vêm do próprio ModPanel.
 zwo-vulcan-bridge/   API br.com.serpens.vulcanbridge.api (PingStateProvider...)
                      + escalada (core/ sem Bukkit, testável) + integração Vulcan/ModPanel/Floodgate
 zwo-ping-state/      plugin do provedor (core/ sem Bukkit, testável)
-docs/                instalação, diagnóstico, validação
+docs/                instalação e diagnóstico
 dist/                JARs prontos desta versão
 ```

@@ -3,8 +3,8 @@
 Requisitos: **Paper 1.21.11**, **Java 21**, **Vulcan 2.9.7.29** com **packetevents compatível**, **ModPanel 3.1.0**
 e, na rede com Geyser, **Floodgate** instalado no Paper (backend), não só no Velocity.
 
-> No teste local, o Vulcan 2.9.7.29 **não funciona com packetevents 2.12.1** (todo jogador sai com "Invalid
-> packet"). Com o packetevents 2.14.0 funcionou. Confira a versão antes de atualizar.
+> O Vulcan 2.9.7.29 **não funciona com packetevents 2.12.1** (todo jogador sai com "Invalid packet").
+> Use o packetevents 2.14.0 ou mais novo.
 
 > **Não ative punições (`mode: ENFORCE`) em produção** sem antes passar pelo período de observação (item 6).
 
@@ -33,8 +33,7 @@ Ordem de carregamento automática: ZwoPingState `softdepend: [ZwoVulcanBridge]`;
    `plugins/ZwoVulcanBridge/config.yml` antigo (as chaves mudaram) para gerar o novo. `punicoes.log` e
    `strikes.yml` antigos não são mais usados.
 5. **Vulcan:** em `plugins/Vulcan/config.yml`, deixe **todos os checks com `punishable: false`**. A ponte
-   continua recebendo as flags (confirmado no teste: 364 flags, 0 punições do Vulcan). Se algum check ainda
-   punir, a ponte cancela a punição e avisa no console e no `/zvb status`.
+   continua recebendo as flags. Se algum check ainda punir, a ponte cancela a punição e avisa no console e no `/zvb status`.
 6. Inicie o servidor. No console devem aparecer:
 
 ```
@@ -69,20 +68,10 @@ Mesmo com tudo ok:
 
 Durante a observação, veja quais checks aparecem nas linhas `[OBSERVE]` do `decisoes.log` e nos alertas do
 Vulcan para quem realmente trapaceia, e quais aparecem em jogadores legítimos. Aprove só checks de **alta
-confiança**, com VL mínimo alto, e agrupe em famílias:
+confiança**, com VL mínimo alto, e agrupe em famílias. Cada entrada de `evidence.checks` é
+`nome` ou `'nome:tipo'` com `min-vl`, `min-flags` e `family` (veja os comentários do `config.yml`).
 
-```yaml
-evidence:
-  window-seconds: 120
-  min-families: 2
-  checks:
-    speed:        { min-vl: 10, min-flags: 2, family: movimento }
-    fly:          { min-vl: 8,  min-flags: 2, family: movimento }
-    'killaura:a': { min-vl: 5,  min-flags: 3, family: combate }
-    reach:        { min-vl: 6,  min-flags: 3, family: combate }
-```
-
-Esses valores são **exemplo**, não recomendação. Problemas de config (check duplicado, `min-vl` inválido,
+Problemas de config (check duplicado, `min-vl` inválido,
 tipo inválido) aparecem no console e no `/zvb status`. Aplique com `/zvb reload` (as evidências em andamento
 são descartadas).
 

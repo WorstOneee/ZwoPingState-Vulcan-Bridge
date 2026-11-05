@@ -9,7 +9,7 @@
 #               na coleta.
 #  A ZwoVulcanBridge só avalia flags do Vulcan quando a resposta é STABLE.
 #
-#  Limitações honestas:
+#  Limitações:
 #   - Ping baixo NÃO é prova de trapaça.
 #   - O Paper não mede perda de pacotes. O valor usado é Player#getPing(),
 #     a latência que o próprio servidor calcula pelos keep-alives.
@@ -50,7 +50,6 @@ limits:
   # amostras seguidas. Por isso existe também o limite de amplitude abaixo.
   max-jitter: 25
   # Oscilação: amplitude da janela (maior - menor amostra, em ms).
-  # No teste local: conexão estável ~2 ms; RTT aleatório 20-280 ms ~90 ms.
   max-range: 60
   # Um salto entre duas amostras consecutivas maior ou igual a isso (ms)
   # conta como pico.
@@ -98,7 +97,7 @@ server:
 bedrock:
   # true = jogadores Bedrock respondem UNKNOWN (BEDROCK_PROXY).
   # A ZwoVulcanBridge já exclui Bedrock das punições; isto só deixa o
-  # diagnóstico honesto.
+  # diagnóstico correto.
   report-unknown: true
   # Prefixos de nome do Floodgate (usado se a API do Floodgate não existir).
   name-prefixes: ["."]

@@ -47,8 +47,6 @@ Idade das amostras: média 521 ms | mais antiga 1033 ms (vence em 5000 ms)
 Servidor: estável | TPS curto 19.98 | MSPT 9.2 | última travada 294 ms há 137 s
 ```
 
-(Saída real do teste de carga local com 98 bots; ver [VALIDACAO.md](VALIDACAO.md).)
-
 O que observar:
 
 - **amostras/s** ≈ número de jogadores (1 por segundo cada).
@@ -92,14 +90,10 @@ descarta as evidências em andamento e confere de novo o ModPanel e o config do 
 ## `decisoes.log`
 
 `plugins/ZwoVulcanBridge/decisoes.log`. Uma linha por **decisão**, nunca por flag, gravada fora da thread do
-servidor. Exemplos reais do teste local:
+servidor, no formato:
 
 ```
-[2026-11-05 02:04:03] zqc3 (6af5e353-...) — [OBSERVE] ocorrência válida; teria aplicado: 1º kick (kicks confirmados no histórico real: 0; nada foi aplicado) — evidências: speed x2 (VL até 11, família speed), motion x2 (VL até 3, família motion) — modo OBSERVE
-[2026-11-05 02:05:47] zqe1 (3cd2bfb1-...) — kick 1 CONFIRMADO (desconexão pela ponte); kicks no histórico: 1; válido até ... — modo ENFORCE
-[2026-11-05 02:20:28] zqi1 (077681e0-...) — [revisão] ocorrência válida, mas a automação está BLOQUEADA (ModPanel: INCOMPATÍVEL — ...); próximo passo seria: 1º kick — ...
-[2026-11-05 02:29:24] zlx0 (6f4ad5b8-...) — ocorrência DESCARTADA na revalidação: conexão UNSTABLE/SERVER_UNSTABLE — ...
-[2026-11-05 01:56:38] zqb1 (bd1485cd-...) — [revisão] ocorrência registrada só para revisão — conta incerto (só revisão) (Floodgate ausente: não dá para confirmar Java); ...
+[data hora] nick (uuid) — decisão — evidências (check xN, VL, família) — modo
 ```
 
 Procure por `[revisão]`: são os casos que precisam de alguém da staff (conta incerta, automação bloqueada, kick

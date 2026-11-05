@@ -51,12 +51,6 @@ evidence:
   #              a memória por jogador é fixa.
   #   family:    família (padrão = nome do check). Checks da mesma família
   #              contam como uma só.
-  # Exemplo (NÃO é recomendação; ajuste depois de observar):
-  #   checks:
-  #     speed:      { min-vl: 10, min-flags: 2, family: movimento }
-  #     fly:        { min-vl: 8,  min-flags: 2, family: movimento }
-  #     'killaura:a': { min-vl: 5, min-flags: 3, family: combate }
-  #     reach:      { min-vl: 6,  min-flags: 3, family: combate }
   checks: {}
 
 sequence:

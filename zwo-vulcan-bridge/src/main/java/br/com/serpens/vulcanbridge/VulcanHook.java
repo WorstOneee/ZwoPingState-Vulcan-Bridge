@@ -20,7 +20,7 @@ import java.util.logging.Logger;
  * Integração com o Vulcan sem dependência de compilação (MethodHandles resolvidos uma vez).
  *
  * <p>A evidência vem do {@code VulcanFlagEvent}, que o Vulcan 2.9.7.29 dispara também nos checks
- * com {@code punishable: false} (conferido no teste local). A ponte não altera nem cancela as flags.
+ * com {@code punishable: false}. A ponte não altera nem cancela as flags.
  * O {@code VulcanPunishEvent} é sempre cancelado: os comandos automáticos do Vulcan devem ficar
  * desligados, e se algum check ainda estiver punível a ponte impede a punição e avisa.</p>
  */
