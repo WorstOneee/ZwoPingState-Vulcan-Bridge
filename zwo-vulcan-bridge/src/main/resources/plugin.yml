@@ -1,0 +1,27 @@
+name: ZwoVulcanBridge
+version: '${version}'
+main: br.com.serpens.vulcanbridge.ZwoVulcanBridgePlugin
+api-version: '1.21'
+authors: [Zwo]
+description: Ponte entre o Vulcan e o SerpensModPanel, condicionada à qualidade de conexão (PingStateProvider).
+softdepend: [Vulcan, floodgate]
+
+commands:
+  zwovulcanbridge:
+    description: Diagnóstico e administração da ZwoVulcanBridge.
+    usage: /zvb [status|jogador|strikes|limpar|reload]
+    aliases: [zvb]
+
+permissions:
+  zwovulcanbridge.admin:
+    description: Acesso completo (reload e limpar histórico).
+    default: op
+    children:
+      zwovulcanbridge.staff: true
+      zwovulcanbridge.alerts: true
+  zwovulcanbridge.staff:
+    description: Ver o diagnóstico da ponte.
+    default: op
+  zwovulcanbridge.alerts:
+    description: Receber os avisos de ocorrências (observação, kick, ban).
+    default: op

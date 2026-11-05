@@ -1,0 +1,104 @@
+# =====================================================================
+#  ZwoPingState — qualidade de conexão dos jogadores
+# =====================================================================
+#  Este plugin NÃO pune ninguém. Ele só responde, por UUID:
+#    STABLE   = há amostras recentes e suficientes, todas dentro dos limites.
+#    UNSTABLE = houve sinal de instabilidade (ping alto, oscilando, picos,
+#               servidor instável ou ainda em recuperação).
+#    UNKNOWN  = faltam dados, os dados venceram, jogador Bedrock ou falha
+#               na coleta.
+#  A ZwoVulcanBridge só avalia flags do Vulcan quando a resposta é STABLE.
+#
+#  Limitações honestas:
+#   - Ping baixo NÃO é prova de trapaça.
+#   - O Paper não mede perda de pacotes. O valor usado é Player#getPing(),
+#     a latência que o próprio servidor calcula pelos keep-alives.
+#   - Para Bedrock (Geyser), o Paper enxerga o ping do Geyser, não do
+#     celular/console. Por isso Bedrock responde UNKNOWN por padrão.
+#
+#  Diagnóstico: /pingstate <nick>  e  /pingstate stats
+# =====================================================================
+
+collector:
+  # Cada jogador é amostrado uma vez a cada N ticks (20 ticks = 1 segundo).
+  # Os jogadores são divididos em lotes ao longo desses ticks: com 100
+  # jogadores e 20 ticks, são ~5 leituras por tick, nunca 100 de uma vez.
+  sample-interval-ticks: 20
+  # Orçamento fixo: máximo de jogadores lidos num único tick. Se houver mais
+  # jogadores do que interval * este valor, cada um é lido com menos
+  # frequência (e pode vencer -> UNKNOWN). 32 * 20 = 640 jogadores por segundo.
+  max-players-per-tick: 32
+  # Orçamento de tempo por tick, em microssegundos. Se estourar, o lote para
+  # e continua no próximo tick (aparece em /pingstate stats).
+  max-micros-per-tick: 1000
+
+window:
+  # Tamanho da janela circular por jogador (amostras). 20 = ~20 segundos.
+  size: 20
+  # Amostras válidas mínimas antes de responder STABLE.
+  min-samples: 8
+
+limits:
+  # Última amostra acima disso (ms) = ping alto.
+  max-ping: 250
+  # Média da janela acima disso (ms) = ping alto.
+  max-average-ping: 200
+  # Oscilação: média da diferença entre amostras consecutivas (ms).
+  # Atenção: no Paper 1.21.11 o Player#getPing() já é a MÉDIA dos keep-alives
+  # dos últimos 5 s (um keep-alive por segundo). Isso suaviza a oscilação:
+  # um RTT que varia de 20 a 280 ms aparece como ~10-20 ms de diferença entre
+  # amostras seguidas. Por isso existe também o limite de amplitude abaixo.
+  max-jitter: 25
+  # Oscilação: amplitude da janela (maior - menor amostra, em ms).
+  # No teste local: conexão estável ~2 ms; RTT aleatório 20-280 ms ~90 ms.
+  max-range: 60
+  # Um salto entre duas amostras consecutivas maior ou igual a isso (ms)
+  # conta como pico.
+  spike-jump: 80
+  # Uma amostra maior ou igual a isso (ms) conta como pico.
+  spike-absolute: 400
+  # Quantos picos são tolerados dentro da janela. 0 = qualquer pico deixa
+  # o jogador UNSTABLE até o pico sair da janela + recuperação.
+  max-spikes: 0
+
+recovery:
+  # Depois de qualquer instabilidade do jogador, ele precisa ficar este
+  # tempo CONTÍNUO dentro dos limites para voltar a STABLE. Uma única
+  # amostra boa não libera a avaliação.
+  player-seconds: 10
+  # Depois de qualquer instabilidade do servidor (TPS, MSPT ou travada),
+  # todos ficam UNSTABLE por este tempo contínuo sem novos problemas.
+  server-seconds: 10
+
+freshness:
+  # Se a última avaliação de um jogador for mais velha que isso, a resposta
+  # é UNKNOWN (dados vencidos). Ex.: o servidor travou e o lote atrasou.
+  stale-after-seconds: 5
+  # Se um jogador ficar mais que isso sem amostra, a janela dele é zerada
+  # (os dados antigos não descrevem mais a conexão atual).
+  reset-window-after-gap-seconds: 5
+
+join:
+  # Logo após entrar/reconectar, o Paper informa ping 0 até o primeiro
+  # keep-alive. Durante este tempo, 0 é tratado como "sem dado".
+  # Todo jogador começa em UNKNOWN ao entrar ou reconectar.
+  zero-ping-grace-seconds: 20
+
+server:
+  # TPS curto (medido pela própria coleta nos últimos 20 ticks) abaixo
+  # disso = servidor instável.
+  min-tps: 18.0
+  # MSPT médio dos últimos 20 ticks (duração que o Paper informa no fim de cada tick)
+  # acima disso = servidor instável.
+  max-mspt: 50.0
+  # Um único tick mais longo que isso (ms) = travada isolada.
+  # A coleta só atualiza um marcador global; nunca percorre jogadores.
+  stall-ms: 250
+
+bedrock:
+  # true = jogadores Bedrock respondem UNKNOWN (BEDROCK_PROXY).
+  # A ZwoVulcanBridge já exclui Bedrock das punições; isto só deixa o
+  # diagnóstico honesto.
+  report-unknown: true
+  # Prefixos de nome do Floodgate (usado se a API do Floodgate não existir).
+  name-prefixes: ["."]

@@ -1,0 +1,24 @@
+name: ZwoPingState
+version: '${version}'
+main: dev.zwo.pingstate.ZwoPingStatePlugin
+api-version: '1.21'
+authors: [Zwo]
+description: Informa a qualidade da conexão dos jogadores (STABLE/UNSTABLE/UNKNOWN) para a ZwoVulcanBridge. Não pune ninguém.
+# softdepend: carrega depois da ponte (a interface PingStateProvider vem do JAR dela).
+softdepend: [ZwoVulcanBridge, floodgate]
+
+commands:
+  pingstate:
+    description: Diagnóstico da qualidade de conexão (staff).
+    usage: /pingstate <nick|stats|reload>
+    aliases: [zps]
+
+permissions:
+  zwopingstate.admin:
+    description: Diagnóstico e reload.
+    default: op
+    children:
+      zwopingstate.staff: true
+  zwopingstate.staff:
+    description: Ver o diagnóstico de conexão.
+    default: op

@@ -1,0 +1,104 @@
+# =====================================================================
+#  ZwoVulcanBridge — ponte entre o Vulcan e o SerpensModPanel
+# =====================================================================
+#  Como funciona:
+#   1. O Vulcan gera uma flag.
+#   2. A ponte pergunta ao provedor de conexão (ZwoPingState) o estado do
+#      jogador: STABLE, UNSTABLE ou UNKNOWN.
+#   3. Se NÃO for STABLE (ou se o provedor não estiver disponível), a
+#      sequência de flags do jogador é DESCARTADA. Lag nunca vira punição.
+#   4. Se for STABLE, a flag é avaliada. Muitas flags altas dentro da janela
+#      confirmam uma "ocorrência".
+#   5. Escada por perfil (UUID): 1ª ocorrência = kick, 2ª = kick (em outra
+#      sessão), 3ª ocorrência válida = ban por PERFIL. Nunca ban por IP.
+#
+#  Use /zvb status para conferir tudo depois de editar.
+# =====================================================================
+
+# OBSERVE  = padrão. Avalia, registra em ocorrencias.log e avisa a staff,
+#            mas NÃO kicka nem bane ninguém.
+# ENFORCE  = executa a escada de punições.
+# Mantenha OBSERVE até revisar o ocorrencias.log por alguns dias.
+mode: OBSERVE
+
+vulcan:
+  # FLAG      = usa o VulcanFlagEvent (a ponte soma +1 ao VL, que ainda não
+  #             foi incrementado nesse evento). Recomendado.
+  # POST_FLAG = usa o VulcanPostFlagEvent. ATENÇÃO: no teste com o Vulcan
+  #             2.9.7.29 esse evento NÃO foi disparado para as flags (0 flags
+  #             recebidas), por isso o padrão é FLAG.
+  # Se o evento escolhido não existir na sua versão do Vulcan, a ponte cai
+  # automaticamente para o VulcanFlagEvent. Mudar aqui + /zvb reload refaz o hook.
+  listen-event: FLAG
+  # true = bloqueia as punições internas do Vulcan (VulcanPunishEvent), para
+  # que TODA punição passe pela checagem de conexão desta ponte.
+  # Se você deixar false, o Vulcan pode punir sozinho, sem olhar o ping.
+  cancel-vulcan-punishments: true
+
+flags:
+  # Uma flag é "alta" quando o VL do check >= VL máximo do check (no Vulcan)
+  # multiplicado por este valor. 1.0 = só conta quando o próprio Vulcan já
+  # consideraria o jogador punível naquele check (regra do Vulcan).
+  # Ex.: 0.6 com maxVl 20 = conta a partir do VL 12.
+  min-vl-ratio: 1.0
+  # Piso absoluto: nenhuma flag com VL abaixo disso conta como alta.
+  # Cuidado: vários checks do Vulcan têm maxVl baixo (ex.: Motion E = 3).
+  min-vl: 3
+  # Quantas flags altas dentro da janela confirmam uma ocorrência.
+  required-high-flags: 3
+  # Tamanho da janela, em segundos.
+  window-seconds: 60
+  # true = só considera checks marcados como puníveis no Vulcan.
+  only-punishable-checks: true
+  # Checks ignorados: "nome" (todos os tipos) ou "nome:tipo". Minúsculas.
+  # Ex.: [ "timer", "badpackets:x" ]
+  ignored-checks: []
+  # Categorias ignoradas (ex.: player, combat, movement).
+  ignored-categories: []
+
+# Proteções de teleporte, respawn e troca de mundo. Durante a proteção, a
+# sequência de flags é descartada (o Vulcan costuma gerar flags falsas logo
+# após mudanças bruscas de posição).
+# A proteção de ENTRADA/RECONEXÃO não fica aqui: o ZwoPingState responde
+# UNKNOWN logo após o join até ter amostras suficientes, o que já descarta
+# as flags. Assim a lógica não é duplicada.
+protections:
+  teleport-seconds: 3
+  respawn-seconds: 3
+  world-change-seconds: 3
+
+punishments:
+  # Kicks válidos (em sessões distintas) antes do ban por perfil.
+  kicks-before-ban: 2
+  # Depois de quantos dias uma ocorrência deixa de contar. 0 = nunca vence.
+  strike-expire-days: 30
+  # Mensagem do kick. Placeholders: {player}, {uuid}, {check}. Cores com &.
+  kick-message: "&cVocê foi desconectado pelo anticheat.\n&7Se acredita que foi um erro, fale com a staff."
+  # Comando de console para o BAN POR PERFIL na 3ª ocorrência.
+  # Placeholders: {player}, {uuid}, {check}, {reason}.
+  #
+  # IMPORTANTE: o /mpban do ModPanel/SerpensModPanel também bane o ÚLTIMO IP
+  # do jogador (quando o IP tem menos contas que limits.ip-ban-account-limit).
+  # Por isso /mpban, /mptempban, /mpipban, /ban-ip e similares são RECUSADOS.
+  # Use um comando que bana SOMENTE o perfil. Enquanto estiver vazio, a 3ª
+  # ocorrência kicka o jogador e fica PENDENTE para revisão manual da staff.
+  ban-command: ""
+  # Motivo usado em {reason}.
+  ban-reason: "Anticheat (Vulcan): {check}"
+  # Mensagem do kick quando o ban foi aplicado.
+  ban-kick-message: "&cVocê foi banido pelo anticheat.\n&7Para recorrer, procure a staff."
+  # Mensagem do kick quando o ban ficou pendente para revisão manual.
+  pending-ban-kick-message: "&cVocê foi desconectado pelo anticheat.\n&7Seu caso foi enviado para revisão da staff."
+
+bedrock:
+  # Jogadores Bedrock (Geyser/Floodgate) nunca recebem punição automática.
+  exclude-from-punishments: true
+  # Prefixos de nome usados pelo Floodgate (caso a API não esteja disponível).
+  name-prefixes: ["."]
+
+alerts:
+  # Avisar a staff online (permissão zwovulcanbridge.alerts) a cada ocorrência.
+  notify-staff: true
+  # Gravar cada ocorrência em plugins/ZwoVulcanBridge/ocorrencias.log.
+  # (Somente ocorrências confirmadas, nunca cada flag.)
+  audit-log: true
