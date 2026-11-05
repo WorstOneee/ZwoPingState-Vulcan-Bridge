@@ -21,8 +21,8 @@ Vulcan (punishable: false) ──VulcanFlagEvent──▶ ZwoVulcanBridge
                                   per-UUID history (historico.yml, written off the server thread)
 ```
 
-- Installation, activation and rollback: [docs/INSTALACAO.md](docs/INSTALACAO.md)
-- Diagnostics (`/pingstate`, `/zvb`, `decisoes.log`, `historico.yml`): [docs/DIAGNOSTICO.md](docs/DIAGNOSTICO.md)
+- Installation, activation and rollback: [docs/INSTALLATION.md](docs/INSTALLATION.md)
+- Diagnostics (`/pingstate`, `/zvb`, `decisoes.log`, `historico.yml`): [docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md)
 - Commented configuration: [ZwoPingState](zwo-ping-state/src/main/resources/config.yml) ·
   [ZwoVulcanBridge](zwo-vulcan-bridge/src/main/resources/config.yml)
 

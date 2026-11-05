@@ -1,99 +1,103 @@
 # =====================================================================
-#  ZwoVulcanBridge 3 — escalada do anticheat por UUID
+#  ZwoVulcanBridge 3 — per-UUID anticheat escalation
 # =====================================================================
-#  Quem decide agora é a PONTE. O Vulcan só detecta:
-#   - No config do Vulcan, deixe TODOS os checks com punishable: false.
-#     (Se algum ainda punir, a ponte cancela a punição e avisa no console.)
-#   - A ponte lê as flags do Vulcan (VulcanFlagEvent), que continuam
-#     chegando com punishable: false.
+#  The BRIDGE makes the decision now. Vulcan only detects:
+#   - In the Vulcan config, set EVERY check to punishable: false.
+#     (If any check still punishes, the bridge cancels the punishment
+#     and warns in the console.)
+#   - The bridge reads Vulcan's flags (VulcanFlagEvent), which keep
+#     arriving with punishable: false.
 #
-#  Uma OCORRÊNCIA só vale quando, dentro de evidence.window-seconds:
-#   - há flags de checks APROVADOS abaixo, com VL >= min-vl;
-#   - cada check aprovado repetiu pelo menos min-flags vezes;
-#   - pelo menos min-families FAMÍLIAS diferentes cumpriram isso
-#     (uma flag isolada ou várias do mesmo check nunca bastam);
-#   - a conexão ficou STABLE o tempo todo (ZwoPingState). Uma flag com a
-#     conexão UNSTABLE/UNKNOWN, ou sem provedor, DESCARTA a sequência;
-#   - a conexão é conferida de novo logo antes de agir;
-#   - a conta é Java CONFIRMADA (Floodgate). Bedrock fica fora. Conta
-#     incerta só gera registro para revisão.
-#  No máximo UMA ocorrência por sessão.
+#  An OCCURRENCE only counts when, within evidence.window-seconds:
+#   - there are flags from the APPROVED checks below, with VL >= min-vl;
+#   - each approved check repeated at least min-flags times;
+#   - at least min-families different FAMILIES met that
+#     (a single flag, or many from the same check, is never enough);
+#   - the connection stayed STABLE the whole time (ZwoPingState). A flag
+#     with an UNSTABLE/UNKNOWN connection, or no provider, DISCARDS the
+#     sequence;
+#   - the connection is checked again right before acting;
+#   - the account is a CONFIRMED Java account (Floodgate). Bedrock is
+#     excluded. An uncertain account is only logged for review.
+#  At most ONE occurrence per session.
 #
-#  Sequência por UUID (vale sequence.validity a partir do 1º kick):
-#   1ª ocorrência -> kick
-#   2ª (outra sessão) -> 2º kick
-#   3ª (outra sessão) -> ban temporário SÓ DO PERFIL pelo ModPanel
-#  Um kick só conta se a desconexão for confirmada como resultado da ponte
-#  (kick cancelado, saída voluntária e timeout não contam).
-#  O ban usa a ProfileBanApi do ModPanel 3.1.0+: nunca bane IP e nunca
-#  executa /mpban, /mptempban ou /ban-ip. Se o ModPanel faltar ou for
-#  antigo, a automação fica BLOQUEADA (veja /zvb status).
+#  Per-UUID sequence (valid for sequence.validity from the 1st kick):
+#   1st occurrence -> kick
+#   2nd (another session) -> 2nd kick
+#   3rd (another session) -> temporary ban of the PROFILE ONLY via ModPanel
+#  A kick only counts if the disconnect is confirmed as caused by the
+#  bridge (a cancelled kick, a voluntary quit and a timeout do not count).
+#  The ban uses ModPanel 3.1.0+'s ProfileBanApi: it never bans an IP and
+#  never runs /mpban, /mptempban or /ban-ip. If ModPanel is missing or
+#  outdated, automation is BLOCKED (see /zvb status).
 #
-#  Use /zvb status depois de editar e /zvb reload para aplicar.
+#  Run /zvb status after editing and /zvb reload to apply.
 # =====================================================================
 
-# OBSERVE = padrão. Junta as evidências e registra em decisoes.log o que
-#           TERIA feito. Não kicka, não bane e não mexe no histórico real.
-# ENFORCE = aplica a sequência. Só ligue depois de revisar o decisoes.log.
+# OBSERVE = default. Gathers evidence and logs to decisoes.log what it
+#           WOULD have done. Does not kick, ban or touch the real history.
+# ENFORCE = applies the sequence. Only enable it after reviewing decisoes.log.
 mode: OBSERVE
 
 evidence:
-  # Janela de tempo para juntar as flags de uma ocorrência.
+  # Time window to gather the flags of one occurrence.
   window-seconds: 120
-  # Famílias diferentes exigidas na janela (mínimo 2).
+  # Different families required within the window (minimum 2).
   min-families: 2
-  # Checks aprovados. VAZIO = nenhuma ocorrência possível (automação parada).
-  # Chave: nome do check do Vulcan ("speed") ou nome:tipo ('speed:b', entre
-  # aspas). Campos:
-  #   min-vl:    VL mínimo da flag para contar (obrigatório)
-  #   min-flags: quantas flags desse check na janela (padrão 2, máximo 32).
-  #              A ponte guarda só as últimas min-flags de cada check, então
-  #              a memória por jogador é fixa.
-  #   family:    família (padrão = nome do check). Checks da mesma família
-  #              contam como uma só.
+  # Approved checks. EMPTY = no occurrence is possible (automation stopped).
+  # Key: Vulcan check name ("speed") or name:type ('speed:b', in quotes).
+  # Fields:
+  #   min-vl:    minimum VL of a flag for it to count (required)
+  #   min-flags: how many flags of this check within the window (default 2,
+  #              max 32). The bridge keeps only the last min-flags of each
+  #              check, so memory per player is fixed.
+  #   family:    family (default = check name). Checks in the same family
+  #              count as one.
   checks: {}
 
 sequence:
-  # Validade do histórico, contada a partir do 1º kick (s, m, h, d, w).
+  # History validity, counted from the 1st kick (s, m, h, d, w).
   validity: 7d
-  # Duração do ban temporário da 3ª ocorrência (limitada pelo
-  # limits.max-tempban-days do ModPanel).
+  # Duration of the 3rd-occurrence temporary ban (capped by ModPanel's
+  # limits.max-tempban-days).
   ban-duration: 24h
   ban-reason: 'Uso de trapaça detectado pelo anticheat (3ª ocorrência)'
-  # Nome que aparece no histórico do ModPanel como quem aplicou.
+  # Name shown in ModPanel's history as who applied the ban.
   actor: 'ZwoVulcanBridge'
-  # Sem resposta do ModPanel nesse tempo = resultado incerto (vai para
-  # revisão; a ponte não tenta outro ban).
+  # No answer from ModPanel within this time = uncertain result (goes to
+  # review; the bridge does not try another ban).
   ban-timeout-seconds: 30
 
+# Messages shown to the kicked player.
 messages:
   kick-1: "&cVocê foi desconectado pelo anticheat.\n&7Comportamento irregular detectado. Se acontecer de novo, nova desconexão; na terceira vez, ban temporário."
   kick-2: "&cVocê foi desconectado pelo anticheat pela 2ª vez.\n&7Na próxima ocorrência você será banido temporariamente."
 
-# Proteções: flags durante a proteção não contam, e a ação é cancelada se a
-# proteção estiver ativa no momento de agir.
-# A proteção de ENTRADA fica no ZwoPingState: ele responde UNKNOWN logo após
-# o join até ter amostras suficientes, o que já descarta as flags.
+# Protections: flags during a protection do not count, and the action is
+# cancelled if a protection is active at the moment of acting.
+# JOIN protection lives in ZwoPingState: it answers UNKNOWN right after
+# joining until it has enough samples, which already discards the flags.
 protections:
   teleport-seconds: 3
   respawn-seconds: 3
   world-change-seconds: 3
 
 bedrock:
-  # Prefixos de nome do Floodgate. Nome com prefixo = Bedrock (fora da
-  # automação). Nome SEM prefixo não prova nada: Java só é confirmado pela
-  # API do Floodgate.
+  # Floodgate name prefixes. Name with a prefix = Bedrock (excluded from
+  # automation). A name WITHOUT a prefix proves nothing: Java is only
+  # confirmed by the Floodgate API.
   name-prefixes: ["."]
-  # Só para servidores SEM Geyser/Floodgate: considera Java toda conta sem
-  # sinal de Bedrock. Com Geyser na rede, deixe false (sem a API do
-  # Floodgate não dá para separar Java de Bedrock com segurança).
+  # Only for servers WITHOUT Geyser/Floodgate: treats every account with no
+  # sign of Bedrock as Java. With Geyser on the network, keep it false
+  # (without the Floodgate API, Java and Bedrock cannot be told apart
+  # safely).
   assume-java-without-floodgate: false
 
 alerts:
-  # Avisar a staff online (permissão zwovulcanbridge.alerts) a cada decisão.
+  # Notify online staff (permission zwovulcanbridge.alerts) on each decision.
   notify-staff: true
-  # Gravar cada decisão em plugins/ZwoVulcanBridge/decisoes.log (nunca por flag).
+  # Write each decision to plugins/ZwoVulcanBridge/decisoes.log (never per flag).
   audit-log: true
-  # Ao ligar e no /zvb reload: avisar se o Vulcan tem checks puníveis ou
-  # comandos que banem IP. A ponte não altera o config do Vulcan.
+  # On startup and on /zvb reload: warn if Vulcan has punishable checks or
+  # commands that ban IPs. The bridge never changes the Vulcan config.
   check-vulcan-config: true
