@@ -1,83 +1,83 @@
 # ZwoPingState + ZwoVulcanBridge
 
-Plugins para **Paper 1.21.11 / Java 21** do servidor **Serpens New Era** (Velocity + Geyser + Floodgate).
-Objetivo: punição automática do anticheat **só com evidência forte**, nunca por lag, e com custo baixo.
+Plugins for **Paper 1.21.11 / Java 21**, built for the **Serpens New Era** server (Velocity + Geyser + Floodgate).
+Goal: automatic anticheat punishment **only on strong evidence**, never because of lag, at a low cost.
 
-| Plugin | Papel |
+| Plugin | Role |
 | --- | --- |
-| **ZwoPingState 1.0.0** | Responde, por UUID, `STABLE`, `UNSTABLE` ou `UNKNOWN` sobre a conexão do jogador. **Não pune ninguém.** |
-| **ZwoVulcanBridge 3.0.0** | **Quem decide é a ponte.** Lê as flags do Vulcan, junta evidências de checks aprovados e aplica a sequência por UUID: **kick → kick (outra sessão) → ban temporário de 24 h só do perfil**, registrado pelo ModPanel. Começa em **observação**. |
-| **ModPanel 3.1.0** | Painel de moderação. A 3.1.0 adiciona a `ProfileBanApi`: ban temporário por UUID com resultado conferido, **sem IP**. |
+| **ZwoPingState 1.0.0** | Reports, per UUID, whether the player's connection is `STABLE`, `UNSTABLE` or `UNKNOWN`. **It never punishes anyone.** |
+| **ZwoVulcanBridge 3.0.0** | **The bridge makes the decision.** It reads Vulcan's flags, gathers evidence from approved checks and applies the per-UUID sequence: **kick → kick (another session) → 24 h temporary ban of the profile only**, recorded through ModPanel. Starts in **observation** mode. |
+| **ModPanel 3.1.0** | Moderation panel. Version 3.1.0 adds `ProfileBanApi`: a temporary ban by UUID with a verified result, **no IP ban**. |
 
 ```
 Vulcan (punishable: false) ──VulcanFlagEvent──▶ ZwoVulcanBridge
-                                                  │ O(1): conexão STABLE? (ZwoPingState) Java confirmado? sem proteção?
-                                                  │       check aprovado? VL >= min-vl?  → guarda a flag (memória fixa)
-                                                  │ >= 2 famílias, cada check repetido min-flags vezes na janela
-                                                  ▼ = OCORRÊNCIA (no máximo 1 por sessão)
-                                  thread do servidor: revalida conexão, proteção, sessão
-                                                  │ OBSERVE → só registra "teria aplicado"
-                                                  ▼ ENFORCE → 1º kick / 2º kick / ban 24h via ProfileBanApi
-                                  histórico por UUID (historico.yml, gravado fora da thread do servidor)
+                                                  │ O(1): connection STABLE? (ZwoPingState) Java confirmed? no protection?
+                                                  │       approved check? VL >= min-vl?  → store the flag (fixed memory)
+                                                  │ >= 2 families, each check repeated min-flags times within the window
+                                                  ▼ = OCCURRENCE (at most 1 per session)
+                                  server thread: revalidates connection, protection, session
+                                                  │ OBSERVE → only logs "would have applied"
+                                                  ▼ ENFORCE → 1st kick / 2nd kick / 24h ban via ProfileBanApi
+                                  per-UUID history (historico.yml, written off the server thread)
 ```
 
-- Instalação, ativação e rollback: [docs/INSTALACAO.md](docs/INSTALACAO.md)
-- Diagnóstico (`/pingstate`, `/zvb`, `decisoes.log`, `historico.yml`): [docs/DIAGNOSTICO.md](docs/DIAGNOSTICO.md)
-- Configurações comentadas: [ZwoPingState](zwo-ping-state/src/main/resources/config.yml) ·
+- Installation, activation and rollback: [docs/INSTALACAO.md](docs/INSTALACAO.md)
+- Diagnostics (`/pingstate`, `/zvb`, `decisoes.log`, `historico.yml`): [docs/DIAGNOSTICO.md](docs/DIAGNOSTICO.md)
+- Commented configuration: [ZwoPingState](zwo-ping-state/src/main/resources/config.yml) ·
   [ZwoVulcanBridge](zwo-vulcan-bridge/src/main/resources/config.yml)
 
-## Como a ponte decide
+## How the bridge decides
 
-**Evidência (caminho de cada flag, O(1), na thread em que o Vulcan dispara):**
+**Evidence (path of each flag, O(1), on the thread where Vulcan fires it):**
 
-1. Conexão diferente de `STABLE`, ou provedor ausente → **descarta toda a sequência** do jogador.
-2. Sessão que já teve ocorrência → ignora (no máximo uma por sessão).
-3. Bedrock → fora da automação.
-4. Check não aprovado no `config.yml` ou VL abaixo do `min-vl` → não conta.
-5. Proteção de teleporte, respawn ou troca de mundo ativa → não conta.
-6. Senão, guarda a flag no anel daquele check (só as últimas `min-flags`, máx. 32).
-7. Ocorrência = pelo menos `min-families` (mínimo 2) famílias com um check que repetiu `min-flags` vezes
-   dentro de `window-seconds`. Uma flag isolada, ou várias do mesmo check/família, nunca bastam.
+1. Connection other than `STABLE`, or no provider → **discards the player's whole sequence**.
+2. Session that already had an occurrence → ignored (at most one per session).
+3. Bedrock → excluded from automation.
+4. Check not approved in `config.yml`, or VL below `min-vl` → does not count.
+5. Teleport, respawn or world-change protection active → does not count.
+6. Otherwise, the flag is stored in that check's ring buffer (only the last `min-flags`, max. 32).
+7. Occurrence = at least `min-families` (minimum 2) families with a check that repeated `min-flags` times
+   within `window-seconds`. A single flag, or many flags from the same check/family, is never enough.
 
-Sem I/O, SQL, rede, varredura de jogadores nem tarefa agendada por flag. Só a ocorrência agenda **uma** tarefa.
+No I/O, SQL, network, player scans or scheduled task per flag. Only an occurrence schedules **one** task.
 
-**Ação (thread do servidor):**
+**Action (server thread):**
 
-1. Confere que o jogador ainda está na **mesma sessão**, e revalida conexão e proteção. Se falhar, descarta.
-2. Conta não confirmada como Java (Floodgate) → só registro para revisão. Prefixo do nome não prova Java.
-3. `OBSERVE` → registra o que **teria** feito, sem tocar no histórico real.
-4. Automação bloqueada (sem checks, Vulcan, provedor ou ModPanel 3.1) → registro para revisão, com o motivo.
-5. Senão, aplica o próximo passo do histórico do UUID:
-   - **1º kick** e **2º kick** (em outra sessão): só contam quando a desconexão é confirmada como resultado da
-     ponte (`PlayerQuitEvent` com motivo KICKED depois do kick não cancelado). Kick cancelado, saída
-     voluntária e timeout não contam.
-   - **Ban temporário** (`sequence.ban-duration`, padrão 24h) pela `ProfileBanApi`. Só marca como aplicado com
-     resposta `APPLIED` conferida pelo ModPanel, sem IP. Falha, timeout ou resposta incerta → **revisão**, sem
-     nova tentativa automática.
-6. O histórico vale `sequence.validity` (7 dias) a partir do 1º kick.
+1. Checks that the player is still in the **same session**, and revalidates connection and protection. If that fails, it is discarded.
+2. Account not confirmed as Java (Floodgate) → logged for review only. A name prefix does not prove Java.
+3. `OBSERVE` → logs what it **would** have done, without touching the real history.
+4. Automation blocked (no checks, Vulcan, provider or ModPanel 3.1) → logged for review, with the reason.
+5. Otherwise, applies the next step of the UUID's history:
+   - **1st kick** and **2nd kick** (in another session): they only count when the disconnect is confirmed as caused
+     by the bridge (`PlayerQuitEvent` with reason KICKED after a kick that was not cancelled). A cancelled kick,
+     a voluntary quit and a timeout do not count.
+   - **Temporary ban** (`sequence.ban-duration`, default 24h) through `ProfileBanApi`. It is only marked as applied
+     after an `APPLIED` response verified by ModPanel, with no IP ban. Failure, timeout or an uncertain response →
+     **review**, with no automatic retry.
+6. The history is valid for `sequence.validity` (7 days) from the 1st kick.
 
-O Vulcan só detecta: todos os checks com `punishable: false`. Se algum ainda punir, a ponte cancela a punição
-e avisa no console.
+Vulcan only detects: every check is set to `punishable: false`. If any check still punishes, the bridge cancels
+the punishment and warns in the console.
 
-## Compilar
+## Building
 
 ```bash
 ./gradlew release
 ```
 
-Gera `build/release/ZwoVulcanBridge-3.0.0.jar` e `build/release/ZwoPingState-1.0.0.jar`. Os JARs prontos estão em
-[`dist/`](dist). O ModPanel 3.1.0 é compilado no repositório dele (`mvn package`); o JAR dele também está em
-`dist/` por conveniência.
+Produces `build/release/ZwoVulcanBridge-3.0.0.jar` and `build/release/ZwoPingState-1.0.0.jar`. Prebuilt JARs are in
+[`dist/`](dist). ModPanel 3.1.0 is built in its own repository (`mvn package`); its JAR is also in `dist/` for
+convenience.
 
-A ponte compila contra uma cópia da interface `dev.zwo.modpanel.api` (source set `modpanelApi`), que **não vai
-no JAR**: em execução as classes vêm do próprio ModPanel.
+The bridge compiles against a copy of the `dev.zwo.modpanel.api` interface (the `modpanelApi` source set), which
+**is not packaged in the JAR**: at runtime the classes come from ModPanel itself.
 
-## Estrutura
+## Layout
 
 ```
 zwo-vulcan-bridge/   API br.com.serpens.vulcanbridge.api (PingStateProvider...)
-                     + escalada (core/ sem Bukkit, testável) + integração Vulcan/ModPanel/Floodgate
-zwo-ping-state/      plugin do provedor (core/ sem Bukkit, testável)
-docs/                instalação e diagnóstico
-dist/                JARs prontos desta versão
+                     + escalation (core/ without Bukkit, testable) + Vulcan/ModPanel/Floodgate integration
+zwo-ping-state/      provider plugin (core/ without Bukkit, testable)
+docs/                installation and diagnostics
+dist/                prebuilt JARs for this version
 ```
