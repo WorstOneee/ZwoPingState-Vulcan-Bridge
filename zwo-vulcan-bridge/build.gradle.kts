@@ -1,4 +1,4 @@
-version = "3.0.0"
+version = "3.1.0"
 
 // Cópia da API pública do ModPanel 3.1.0 (dev.zwo.modpanel.api), só para compilar.
 // NÃO vai para o JAR: em tempo de execução as classes vêm do próprio ModPanel.

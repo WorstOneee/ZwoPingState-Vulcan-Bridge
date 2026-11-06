@@ -12,6 +12,19 @@ public final class ServerHealth {
 
     public enum Cause { NONE, STALL, LOW_TPS, HIGH_MSPT }
 
+    /**
+     * Revisão global + instante do último sinal ruim, publicados juntos (uma escrita volátil). Quem
+     * lê um {@code Mark} nunca combina "servidor estável" com uma revisão anterior à última travada.
+     *
+     * @param revision    avança a cada sinal de instabilidade do servidor; nunca volta
+     * @param lastBadNanos instante do último sinal ruim (só vale se {@code revision > 0})
+     */
+    public record Mark(long revision, long lastBadNanos) {
+        public boolean unstable(long nowNanos, PingSettings s) {
+            return revision > 0 && nowNanos - lastBadNanos < s.serverRecoveryNanos();
+        }
+    }
+
     private static final int GAP_WINDOW = 20;
 
     // --- só thread principal ---
@@ -27,8 +40,7 @@ public final class ServerHealth {
     private double durSum;
 
     // --- lidos por qualquer thread ---
-    private volatile boolean everBad;
-    private volatile long lastBadNanos;
+    private volatile Mark mark = new Mark(0L, 0L);
     private volatile Cause lastCause = Cause.NONE;
     private volatile double lastCauseValue;
     private volatile boolean everStalled;
@@ -103,21 +115,30 @@ public final class ServerHealth {
     private void markBad(long nowNanos, Cause cause, double value) {
         lastCause = cause;
         lastCauseValue = value;
-        lastBadNanos = nowNanos;
-        everBad = true;
+        // Único escritor (thread principal): revisão e instante trocados juntos.
+        mark = new Mark(mark.revision() + 1, nowNanos);
     }
 
     /** O(1). Instável enquanto não passar o período de recuperação desde o último sinal ruim. */
     public boolean unstable(long nowNanos, PingSettings s) {
-        return everBad && nowNanos - lastBadNanos < s.serverRecoveryNanos();
+        return mark.unstable(nowNanos, s);
+    }
+
+    /** Leitura única e consistente de revisão + último sinal ruim. O(1), qualquer thread. */
+    public Mark mark() {
+        return mark;
+    }
+
+    public long revision() {
+        return mark.revision();
     }
 
     public double shortTps() { return shortTps; }
     public double mspt() { return mspt; }
     public Cause lastCause() { return lastCause; }
     public double lastCauseValue() { return lastCauseValue; }
-    public boolean everBad() { return everBad; }
-    public long lastBadNanos() { return lastBadNanos; }
+    public boolean everBad() { return mark.revision() > 0; }
+    public long lastBadNanos() { return mark.lastBadNanos(); }
     public boolean everStalled() { return everStalled; }
     public long lastStallNanos() { return lastStallNanos; }
     public long lastStallLengthNanos() { return lastStallLengthNanos; }

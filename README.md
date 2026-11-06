@@ -5,17 +5,18 @@ Goal: automatic anticheat punishment **only on strong evidence**, never because 
 
 | Plugin | Role |
 | --- | --- |
-| **ZwoPingState 1.0.0** | Reports, per UUID, whether the player's connection is `STABLE`, `UNSTABLE` or `UNKNOWN`. **It never punishes anyone.** |
-| **ZwoVulcanBridge 3.0.0** | **The bridge makes the decision.** It reads Vulcan's flags, gathers evidence from approved checks and applies the per-UUID sequence: **kick → kick (another session) → 24 h temporary ban of the profile only**, recorded through ModPanel. Starts in **observation** mode. |
+| **ZwoPingState 1.1.0** | Reports, per UUID, a snapshot: `STABLE`/`UNSTABLE`/`UNKNOWN`, collection session, instability revisions (player and server) and freshness. **It never punishes anyone.** |
+| **ZwoVulcanBridge 3.1.0** | **The bridge makes the decision.** It reads Vulcan's flags, gathers evidence from approved checks and applies the per-UUID sequence: **kick → kick (another session) → 24 h temporary ban of the profile only**, recorded through ModPanel. Starts in **observation** mode. |
 | **ModPanel 3.1.0** | Moderation panel. Version 3.1.0 adds `ProfileBanApi`: a temporary ban by UUID with a verified result, **no IP ban**. |
 
 ```
 Vulcan (punishable: false) ──VulcanFlagEvent──▶ ZwoVulcanBridge
-                                                  │ O(1): connection STABLE? (ZwoPingState) Java confirmed? no protection?
+                                                  │ O(1): 1 snapshot (ZwoPingState): STABLE, fresh, same revisions?
+                                                  │       Java confirmed? no protection?
                                                   │       approved check? VL >= min-vl?  → store the flag (fixed memory)
                                                   │ >= 2 families, each check repeated min-flags times within the window
                                                   ▼ = OCCURRENCE (at most 1 per session)
-                                  server thread: revalidates connection, protection, session
+                                  server thread: new snapshot, same anchor? protection? session?
                                                   │ OBSERVE → only logs "would have applied"
                                                   ▼ ENFORCE → 1st kick / 2nd kick / 24h ban via ProfileBanApi
                                   per-UUID history (historico.yml, written off the server thread)
@@ -30,7 +31,14 @@ Vulcan (punishable: false) ──VulcanFlagEvent──▶ ZwoVulcanBridge
 
 **Evidence (path of each flag, O(1), on the thread where Vulcan fires it):**
 
-1. Connection other than `STABLE`, or no provider → **discards the player's whole sequence**.
+1. Each flag reads **one snapshot** (state, collection session, player revision, global revision, freshness).
+   `UNSTABLE`, `UNKNOWN`, stale or no provider → **discards the player's whole sequence**. A provider without
+   revisions (ZwoPingState 1.0.0) → nothing counts and automation is blocked.
+   - The 1st piece of evidence stores the **anchor** (provider, collection session and both revisions). If any of
+     them changes — for example, the player lagged **without producing flags** and already recovered — the
+     previous sequence is discarded and the current flag starts a **new** one. Recovery never completes the old one.
+   - Revisions only grow: they advance on every instability, inconclusive data, read failure or loss of collection
+     continuity. Server instability advances one **global** revision (no player scan).
 2. Session that already had an occurrence → ignored (at most one per session).
 3. Bedrock → excluded from automation.
 4. Check not approved in `config.yml`, or VL below `min-vl` → does not count.
@@ -43,7 +51,9 @@ No I/O, SQL, network, player scans or scheduled task per flag. Only an occurrenc
 
 **Action (server thread):**
 
-1. Checks that the player is still in the **same session**, and revalidates connection and protection. If that fails, it is discarded.
+1. Checks that the player is still in the **same session** and reads a new snapshot: it must be STABLE, fresh and
+   carry the **same anchor** as the sequence (lag detected after the last flag cancels it), with no active
+   protection. If that fails, it is discarded.
 2. Account not confirmed as Java (Floodgate) → logged for review only. A name prefix does not prove Java.
 3. `OBSERVE` → logs what it **would** have done, without touching the real history.
 4. Automation blocked (no checks, Vulcan, provider or ModPanel 3.1) → logged for review, with the reason.
@@ -65,7 +75,7 @@ the punishment and warns in the console.
 ./gradlew release
 ```
 
-Produces `build/release/ZwoVulcanBridge-3.0.0.jar` and `build/release/ZwoPingState-1.0.0.jar`. Prebuilt JARs are in
+Produces `build/release/ZwoVulcanBridge-3.1.0.jar` and `build/release/ZwoPingState-1.1.0.jar`. Prebuilt JARs are in
 [`dist/`](dist). ModPanel 3.1.0 is built in its own repository (`mvn package`); its JAR is also in `dist/` for
 convenience.
 

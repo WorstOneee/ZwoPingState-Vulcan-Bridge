@@ -14,8 +14,14 @@ import java.util.UUID;
  *       (o Vulcan pode disparar eventos fora da thread do servidor).</li>
  *   <li>Nunca retorna {@code null} e nunca lança exceção; em caso de dúvida, {@link ConnectionState#UNKNOWN}.</li>
  * </ul>
+ *
+ * <p>Desde a ponte 3.1.0 a automação exige {@link #snapshotVersion()} &gt;= {@link #SNAPSHOT_VERSION}:
+ * um provedor que não informa revisões bloqueia a automação.</p>
  */
 public interface PingStateProvider {
+
+    /** Versão do contrato de {@link #snapshot(UUID)} exigida pela ponte. */
+    int SNAPSHOT_VERSION = 1;
 
     /** Estado atual da conexão do jogador. */
     ConnectionState connection(UUID playerId);
@@ -27,5 +33,24 @@ public interface PingStateProvider {
     default ConnectionStatus status(UUID playerId) {
         ConnectionState state = connection(playerId);
         return ConnectionStatus.of(state, state == ConnectionState.STABLE ? ConnectionReason.OK : ConnectionReason.UNSPECIFIED);
+    }
+
+    /**
+     * Versão do snapshot com revisões que esta implementação fornece. 0 = não fornece
+     * (provedores anteriores à API 3.1.0).
+     */
+    default int snapshotVersion() {
+        return 0;
+    }
+
+    /**
+     * Estado, sessão de coleta, revisões e frescor numa única leitura consistente: o estado STABLE
+     * devolvido nunca vem acompanhado de uma revisão anterior à instabilidade que o precedeu.
+     *
+     * <p>A versão padrão (provedores antigos) devolve {@link ConnectionSnapshot#unsupported}, que
+     * nunca permite avaliação.</p>
+     */
+    default ConnectionSnapshot snapshot(UUID playerId) {
+        return ConnectionSnapshot.unsupported(status(playerId));
     }
 }

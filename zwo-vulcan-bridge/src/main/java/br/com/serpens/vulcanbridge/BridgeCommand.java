@@ -1,5 +1,6 @@
 package br.com.serpens.vulcanbridge;
 
+import br.com.serpens.vulcanbridge.api.ConnectionSnapshot;
 import br.com.serpens.vulcanbridge.api.ConnectionStatus;
 import br.com.serpens.vulcanbridge.core.BridgeMode;
 import br.com.serpens.vulcanbridge.core.CheckRule;
@@ -90,12 +91,15 @@ final class BridgeCommand implements TabExecutor {
         msg(s, "&7Vulcan: " + (v.flagHooked() ? "&aconectado (" + v.version() + ")" : "&c" + v.failure())
                 + " &7| flags lidas &f" + v.flags() + " &7| punições do Vulcan canceladas &f" + v.punishCancelled()
                 + " &7| erros de leitura &f" + v.extractionErrors());
-        msg(s, "&7Provedor de conexão: &f" + plugin.provider().describe() + " &7| falhas: &f" + plugin.provider().failures());
+        msg(s, "&7Provedor de conexão: " + (plugin.provider().compatible() ? "&f" : "&c") + plugin.provider().describe()
+                + " &7| geração &f" + plugin.provider().generation() + " &7| falhas &f" + plugin.provider().failures()
+                + " &7| snapshots inválidos &f" + plugin.provider().invalidSnapshots());
         msg(s, "&7ModPanel: " + (plugin.banLink().backend() != null ? "&a" : "&c") + plugin.banLink().describe());
         msg(s, "&7Floodgate: &f" + plugin.bedrock().floodgateState()
                 + (st.assumeJavaWithoutFloodgate() ? " &c(assume-java-without-floodgate ligado)" : ""));
         msg(s, "&7Evidências: aprovadas &f" + e.approvedFlags() + " &7| descartes por conexão &f" + e.connectionDiscards()
-                + " &7| ignoradas (proteção) &f" + e.graceIgnored());
+                + " &7| por revisão/sessão &f" + e.revisionDiscards() + " &7| ignoradas (proteção) &f" + e.graceIgnored()
+                + (e.incompatibleFlags() > 0 ? " &c| flags com provedor incompatível " + e.incompatibleFlags() : ""));
         msg(s, "&7Ocorrências: &f" + e.triggered() + " &7| observação &f" + c.observed.sum() + " &7| revalidação "
                 + "descartou &f" + c.revalidationDiscards.sum() + " &7| saiu antes &f" + c.leftBeforeAction.sum()
                 + " &7| bloqueadas &f" + c.blocked.sum() + " &7| revisão &f" + c.reviews.sum());
@@ -133,10 +137,16 @@ final class BridgeCommand implements TabExecutor {
             return;
         }
         PlayerSession ses = plugin.sessions().get(p.getUniqueId());
-        ConnectionStatus c = plugin.provider().status(p.getUniqueId());
+        ConnectionSnapshot snap = plugin.provider().snapshot(p.getUniqueId());
+        ConnectionStatus c = snap.status();
         long now = System.currentTimeMillis();
         msg(s, "&6" + p.getName() + " &8(" + p.getUniqueId() + ")");
         msg(s, "&7Conexão: &f" + c.state() + " — " + c.reason().description());
+        msg(s, "&7Snapshot: " + (snap.revisionsSupported()
+                ? "&fsessão de coleta " + snap.sessionId() + " | rev. jogador " + snap.playerRevision()
+                + " | rev. servidor " + snap.serverRevision() + " | idade " + snap.telemetryAgeMillis() + " ms"
+                + (snap.fresh() ? "" : " &c(vencido)")
+                : "&csem revisões (provedor incompatível ou indisponível)"));
         if (ses == null) {
             msg(s, "&cSem sessão na ponte.");
             return;
@@ -144,6 +154,7 @@ final class BridgeCommand implements TabExecutor {
         msg(s, "&7Conta: &f" + ses.kind().description() + " &8(" + ses.kindDetail() + ")");
         msg(s, "&7Proteção: " + (ses.inGrace(now) ? "&e" + ses.graceCause() + " (" + (ses.graceUntilMillis() - now) + " ms)"
                 : "&fnenhuma"));
+        msg(s, "&7Âncora da sequência: &f" + ses.anchorText());
         msg(s, "&7Sessão: estágio &f" + ses.stage() + " &7| evidências na janela &f" + ses.evidenceCount()
                 + " &7| flags aprovadas &f" + ses.approvedFlags() + " &7| descartes &f" + ses.discards()
                 + (ses.discards() > 0 ? " &8(último: " + discardText(ses) + ", " + (now - ses.lastDiscardAtMillis()) / 1000
@@ -156,7 +167,7 @@ final class BridgeCommand implements TabExecutor {
 
     private static String discardText(PlayerSession ses) {
         ConnectionStatus st = ses.lastDiscardStatus();
-        return st == null ? ses.lastDiscardCause() : "conexão " + st.state() + "/" + st.reason();
+        return ses.lastDiscardCause() + (st == null ? "" : " — conexão " + st.state() + "/" + st.reason());
     }
 
     private void history(CommandSender s, String[] args) {

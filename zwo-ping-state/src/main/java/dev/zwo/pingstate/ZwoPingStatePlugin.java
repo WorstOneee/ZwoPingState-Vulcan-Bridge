@@ -69,9 +69,14 @@ public final class ZwoPingStatePlugin extends JavaPlugin implements Listener {
             return;
         }
         try {
-            dev.zwo.pingstate.bridge.BridgeRegistration.register(this, tracker);
+            boolean full = dev.zwo.pingstate.bridge.BridgeRegistration.register(this, tracker);
             bridgeRegistered = true;
-            getLogger().info("Provedor PingStateProvider registrado para a ZwoVulcanBridge.");
+            if (full) {
+                getLogger().info("Provedor PingStateProvider registrado para a ZwoVulcanBridge (snapshot com revisões).");
+            } else {
+                getLogger().warning("ZwoVulcanBridge antiga (sem snapshot com revisões): provedor registrado só com o "
+                        + "estado. Atualize a ponte para 3.1.0 ou mais nova.");
+            }
         } catch (LinkageError e) {
             getLogger().log(Level.SEVERE, "Versão da ZwoVulcanBridge incompatível; provedor não registrado.", e);
         }

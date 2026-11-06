@@ -8,6 +8,9 @@ package dev.zwo.pingstate.core;
  * @param evaluatedAtNanos       quando foi calculado (System.nanoTime)
  * @param lastSampleNanos        quando foi lida a última amostra (0 = nunca)
  * @param recoveryRemainingNanos quanto falta para voltar a STABLE (0 se não está em recuperação)
+ * @param revision               revisão de instabilidade do jogador nesta sessão de coleta. Avança a
+ *                               cada avaliação não STABLE, falha, descontinuidade ou dado vencido;
+ *                               nunca volta. Publicada junto com o estado (mesmo objeto).
  */
 public record PingSnapshot(
         PingStatus status,
@@ -20,10 +23,11 @@ public record PingSnapshot(
         int jitter,
         int spikes,
         int samples,
-        long recoveryRemainingNanos) {
+        long recoveryRemainingNanos,
+        long revision) {
 
-    static PingSnapshot initial(long nowNanos) {
+    static PingSnapshot initial(long nowNanos, long revision) {
         return new PingSnapshot(PingStatus.of(PingState.UNKNOWN, PingReason.INSUFFICIENT_DATA),
-                nowNanos, 0L, -1, -1, -1, -1, -1, 0, 0, 0L);
+                nowNanos, 0L, -1, -1, -1, -1, -1, 0, 0, 0L, revision);
     }
 }

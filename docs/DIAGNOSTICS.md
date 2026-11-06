@@ -74,9 +74,14 @@ Permissions: `zwovulcanbridge.staff` (view), `zwovulcanbridge.admin` (reload and
   provider unavailable, ModPanel missing/incompatible).
 - Approved checks, families and config problems.
 - Vulcan: flags seen, Vulcan punishments cancelled, read errors.
-- Connection provider, ModPanel (`pronto — ModPanel 3.1.0 (API 1)` = ready, `AUSENTE` = missing or
-  `INCOMPATÍVEL — motivo` = incompatible, with the reason) and Floodgate.
-- Counters: approved flags, discards because of the connection, flags during protection, occurrences, observation,
+- Connection provider (`ZwoPingState 1.1.0 (snapshot v1)`, or `INCOMPATÍVEL: sem snapshot com revisões` =
+  incompatible, with 1.0.0), generation (changes whenever the provider is replaced/restarted), failures and invalid
+  snapshots.
+- ModPanel (`pronto — ModPanel 3.1.0 (API 1)` = ready, `AUSENTE` = missing or `INCOMPATÍVEL — motivo` =
+  incompatible, with the reason) and Floodgate.
+- Counters: approved flags, discards because of the connection, **discards because of a revision/session change**
+  (`por revisão/sessão`: lag or stall between flags, provider replaced, reconnect), flags with an incompatible
+  provider, flags during protection, occurrences, observation,
   revalidation, kicks sent/confirmed/cancelled, bans requested/applied/under review.
 - History (UUIDs, validity) and write queue (pending, rejected, failed).
 - Warnings: Vulcan checks with `punishable: true`, Vulcan commands that ban IPs.
@@ -85,7 +90,24 @@ Permissions: `zwovulcanbridge.staff` (view), `zwovulcanbridge.admin` (reload and
 
 The connection state the bridge receives right now, account type (confirmed Java / Bedrock / uncertain, with the
 reason), active protection, session stage (`IDLE`, `TRIGGERED`, `DONE`), evidence in the window, last discard and
-this session's decision.
+this session's decision. Since 3.1:
+
+```
+Snapshot: sessão de coleta 2 | rev. jogador 49 | rev. servidor 4 | idade 175 ms
+Âncora da sequência: sessão de coleta 2, rev. jogador 9, rev. servidor 4
+Sessão: ... descartes 1 (último: instabilidade da conexão desde a 1ª evidência — conexão STABLE/OK, 2 s atrás)
+```
+
+(real output from the local test: the sequence started at revision 9; the player lagged without flags and
+recovered; on the next flag the revision was already 49 and the old sequence was discarded, even with the
+connection STABLE.)
+
+- **Snapshot** is what the provider answers now. **Âncora** (anchor) is what was stored on the 1st piece of
+  evidence of the current sequence. If they differ, the next approved flag discards the old sequence.
+- Discard reasons: `instabilidade da conexão desde a 1ª evidência` (connection instability), `instabilidade do
+  servidor desde a 1ª evidência` (server instability), `nova sessão de coleta` (new collection session),
+  `provedor trocado ou reiniciado` (provider replaced/restarted), `telemetria vencida` (stale telemetry),
+  `conexão não STABLE`, `provedor sem revisões` (provider without revisions).
 
 ### `/zvb historico <nick|uuid>`
 
@@ -123,6 +145,8 @@ becomes `REVIEW`. **Do not edit it while the server is running**; use `/zvb limp
 | `Automação: BLOQUEADA — nenhum check aprovado` (no approved check) | normal with a new config; approve checks in `evidence.checks` |
 | `ModPanel: INCOMPATÍVEL` | ModPanel older than 3.1.0 (no `ProfileBanApi`); update the panel |
 | `Provedor de conexão: nenhum provedor registrado` (no provider registered) | ZwoPingState missing/disabled → every flag is discarded |
+| `Provedor de conexão: ... INCOMPATÍVEL: sem snapshot com revisões` | ZwoPingState 1.0.0 with bridge 3.1 → upgrade ZwoPingState to 1.1.0 |
+| Many `por revisão/sessão` discards | frequent lag/stalls between flags; this is the expected behavior (see `/pingstate stats`) |
 | Every occurrence is "conta incerta" (uncertain account) | Floodgate is not on the Paper backend, or its API failed |
 | "O Vulcan tentou punir N vez(es)" (Vulcan tried to punish N times) | some check is still `punishable: true` in the Vulcan config |
 | Warning "comando(s) que banem IP" (commands that ban IPs) | the Vulcan config has `mpban`/`ban-ip`...; with `punishable: false` they do not run, but remove them anyway |

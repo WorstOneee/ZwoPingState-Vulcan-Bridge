@@ -11,11 +11,26 @@ import org.bukkit.plugin.java.JavaPlugin;
  */
 public final class BridgeRegistration {
 
+    static final String SNAPSHOT_CLASS = "br.com.serpens.vulcanbridge.api.ConnectionSnapshot";
+
     private BridgeRegistration() {
     }
 
-    public static void register(JavaPlugin plugin, PingTracker tracker) {
+    /** @return {@code true} se registrou o provedor completo (com snapshot e revisões) */
+    public static boolean register(JavaPlugin plugin, PingTracker tracker) {
+        boolean full = snapshotApiPresent();
+        PingStateProvider provider = full ? new BridgeProvider(tracker) : new LegacyBridgeProvider(tracker);
         plugin.getServer().getServicesManager()
-                .register(PingStateProvider.class, new BridgeProvider(tracker), plugin, ServicePriority.Normal);
+                .register(PingStateProvider.class, provider, plugin, ServicePriority.Normal);
+        return full;
+    }
+
+    static boolean snapshotApiPresent() {
+        try {
+            Class.forName(SNAPSHOT_CLASS, false, PingStateProvider.class.getClassLoader());
+            return true;
+        } catch (ClassNotFoundException | LinkageError e) {
+            return false;
+        }
     }
 }

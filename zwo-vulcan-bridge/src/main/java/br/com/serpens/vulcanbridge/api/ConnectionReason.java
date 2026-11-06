@@ -14,6 +14,7 @@ public enum ConnectionReason {
     BEDROCK_PROXY("Bedrock: o ping visto pelo Paper é do proxy, não do cliente"),
     COLLECTION_ERROR("falha na coleta"),
     PROVIDER_UNAVAILABLE("provedor de estado indisponível"),
+    PROVIDER_INCOMPATIBLE("provedor sem snapshot com revisões (versão antiga)"),
     UNSPECIFIED("motivo não informado pelo provedor");
 
     private final String description;

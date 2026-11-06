@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.IntSupplier;
 import java.util.function.LongSupplier;
 
@@ -27,6 +28,9 @@ public final class PingTracker {
     private final CollectorStats stats = new CollectorStats();
     private final WindowStats scratch = new WindowStats();
     private final LongSupplier clock;
+    /** Identidade desta instância do provedor: muda a cada criação (reinício, /reload, reinstalação). */
+    private final long epoch;
+    private long sessionCounter; // só thread principal
 
     private volatile PingSettings settings;
     private int cursor;
@@ -38,16 +42,27 @@ public final class PingTracker {
     public PingTracker(PingSettings settings, LongSupplier clock) {
         this.settings = settings;
         this.clock = clock;
+        long r;
+        do {
+            r = ThreadLocalRandom.current().nextLong();
+        } while (r == 0L);
+        this.epoch = r;
+    }
+
+    /** Identidade desta instância (nunca 0). */
+    public long epoch() {
+        return epoch;
     }
 
     // ------------------------------------------------------------------ cadastro (thread principal)
 
     public void register(UUID id, String name, boolean bedrock, IntSupplier pingSource, long nowNanos) {
         unregister(id);
-        PlayerEntry e = new PlayerEntry(id, name, bedrock, pingSource, settings.windowSize(), nowNanos);
+        PlayerEntry e = new PlayerEntry(id, name, bedrock, pingSource, settings.windowSize(), nowNanos,
+                ++sessionCounter);
         if (bedrock && settings.bedrockUnknown()) {
             e.snapshot = new PingSnapshot(PingStatus.of(PingState.UNKNOWN, PingReason.BEDROCK_PROXY),
-                    nowNanos, 0L, -1, -1, -1, -1, -1, 0, 0, 0L);
+                    nowNanos, 0L, -1, -1, -1, -1, -1, 0, 0, 0L, e.revision);
         }
         e.index = rotation.size();
         rotation.add(e);
@@ -143,8 +158,9 @@ public final class PingTracker {
     void sample(PlayerEntry e, long now, PingSettings s) {
         if (e.bedrock && s.bedrockUnknown()) {
             e.lastSampleNanos = now;
+            e.revision++;
             e.snapshot = new PingSnapshot(PingStatus.of(PingState.UNKNOWN, PingReason.BEDROCK_PROXY),
-                    now, now, -1, -1, -1, -1, -1, 0, 0, 0L);
+                    now, now, -1, -1, -1, -1, -1, 0, 0, 0L, e.revision);
             return;
         }
         int ping;
@@ -154,12 +170,19 @@ public final class PingTracker {
             stats.error();
             e.window.clear();
             e.goodSinceNanos = -1;
+            e.revision++;
             e.snapshot = new PingSnapshot(PingStatus.of(PingState.UNKNOWN, PingReason.COLLECTION_ERROR),
-                    now, e.lastSampleNanos, -1, -1, -1, -1, -1, 0, 0, 0L);
+                    now, e.lastSampleNanos, -1, -1, -1, -1, -1, 0, 0, 0L, e.revision);
             return;
         }
 
-        // Descontinuidade: ficou tempo demais sem amostra (lote atrasado, travada). Recomeça.
+        // Perda de continuidade: a última avaliação venceu antes desta amostra (coleta atrasada,
+        // travada). Mesmo sem nenhuma consulta no meio, a revisão avança: evidências anteriores
+        // não podem atravessar esse buraco.
+        if (now - e.snapshot.evaluatedAtNanos() > s.staleNanos()) {
+            e.revision++;
+        }
+        // Descontinuidade longa: recomeça a janela.
         if (e.lastSampleNanos != 0 && now - e.lastSampleNanos > s.resetGapNanos()) {
             e.window.clear();
             e.goodSinceNanos = -1;
@@ -217,8 +240,12 @@ public final class PingTracker {
     }
 
     private static void publish(PlayerEntry e, long now, PingStatus status, WindowStats w, long recoveryRemaining) {
+        if (status.state() != PingState.STABLE) {
+            e.revision++; // instabilidade ou dado inconclusivo: nunca volta
+        }
+        // Estado e revisão no mesmo objeto imutável, publicado numa única escrita volátil.
         e.snapshot = new PingSnapshot(status, now, e.lastSampleNanos, w.last, w.average, w.min, w.max,
-                w.jitter, w.spikes, w.samples, recoveryRemaining);
+                w.jitter, w.spikes, w.samples, recoveryRemaining, e.revision);
     }
 
     // ------------------------------------------------------------------ consulta (qualquer thread)
@@ -239,6 +266,39 @@ public final class PingTracker {
             return PingStatus.SERVER_UNSTABLE;
         }
         return st;
+    }
+
+    /** Recebe uma leitura consistente; evita alocação intermediária. */
+    @FunctionalInterface
+    public interface ViewFactory<T> {
+        T make(PingStatus status, long epoch, long sessionId, long playerRevision, long serverRevision,
+               long ageNanos, boolean fresh);
+    }
+
+    /**
+     * O(1), qualquer thread. Uma leitura do snapshot do jogador (estado + revisão juntos) e uma da
+     * marca global (revisão + último sinal ruim juntos).
+     */
+    public <T> T view(UUID id, long nowNanos, ViewFactory<T> f) {
+        ServerHealth.Mark m = health.mark();
+        PlayerEntry e = byId.get(id);
+        if (e == null) {
+            return f.make(PingStatus.NOT_TRACKED, epoch, 0L, 0L, m.revision(), -1L, false);
+        }
+        PingSettings s = settings;
+        PingSnapshot snap = e.snapshot;
+        long age = nowNanos - snap.evaluatedAtNanos();
+        boolean fresh = age <= s.staleNanos();
+        PingStatus st;
+        if (!fresh) {
+            st = PingStatus.STALE;
+        } else {
+            st = snap.status();
+            if (st.state() == PingState.STABLE && m.unstable(nowNanos, s)) {
+                st = PingStatus.SERVER_UNSTABLE;
+            }
+        }
+        return f.make(st, epoch, e.sessionId, snap.revision(), m.revision(), age, fresh);
     }
 
     /** Para o comando de diagnóstico: o snapshot pronto (null se não monitorado). */

@@ -1,6 +1,7 @@
 package br.com.serpens.vulcanbridge.core;
 
 import br.com.serpens.vulcanbridge.api.ConnectionReason;
+import br.com.serpens.vulcanbridge.api.ConnectionSnapshot;
 import br.com.serpens.vulcanbridge.api.ConnectionState;
 import br.com.serpens.vulcanbridge.api.ConnectionStatus;
 import br.com.serpens.vulcanbridge.core.Escalation.FlagResult;
@@ -19,10 +20,31 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class EscalationTest {
 
-    static final ConnectionStatus STABLE = ConnectionStatus.of(ConnectionState.STABLE, ConnectionReason.OK);
-    static final ConnectionStatus UNSTABLE = ConnectionStatus.of(ConnectionState.UNSTABLE, ConnectionReason.HIGH_PING);
-    static final ConnectionStatus NO_PROVIDER =
-            ConnectionStatus.of(ConnectionState.UNKNOWN, ConnectionReason.PROVIDER_UNAVAILABLE);
+    static final ConnectionStatus OK = ConnectionStatus.of(ConnectionState.STABLE, ConnectionReason.OK);
+    static final ConnectionStatus HIGH_PING = ConnectionStatus.of(ConnectionState.UNSTABLE, ConnectionReason.HIGH_PING);
+    static final long GEN = 1L;
+
+    // Estado do "provedor" simulado: epoch, sessão de coleta e revisões.
+    long epoch = 77L;
+    long collectSession = 5L;
+    long playerRev = 1L;
+    long serverRev = 0L;
+
+    ConnectionSnapshot snap(ConnectionStatus st) {
+        return new ConnectionSnapshot(st, epoch, collectSession, playerRev, serverRev, 200L, true, true);
+    }
+
+    ConnectionSnapshot stable() {
+        return snap(OK);
+    }
+
+    ConnectionSnapshot unstable() {
+        return snap(HIGH_PING);
+    }
+
+    ConnectionSnapshot noProvider() {
+        return ConnectionSnapshot.unavailable(ConnectionReason.PROVIDER_UNAVAILABLE);
+    }
 
     EscalationPolicy policy;
     Escalation esc;
@@ -46,7 +68,7 @@ class EscalationTest {
 
     FlagResult flag(String check, char type, int vl) {
         t += 1000;
-        return esc.onFlag(s, STABLE, check, type, vl, t);
+        return esc.onFlag(s, stable(), GEN, check, type, vl, t);
     }
 
     /** Duas famílias completas: speed x2 + killaura:a x3. */
@@ -112,7 +134,7 @@ class EscalationTest {
         flag("speed", 'a', 12);
         flag("speed", 'a', 12);
         flag("killaura", 'a', 6);
-        assertEquals(FlagResult.CONNECTION_DISCARD, esc.onFlag(s, UNSTABLE, "timer", 'a', 1, t += 1000));
+        assertEquals(FlagResult.CONNECTION_DISCARD, esc.onFlag(s, unstable(), GEN, "timer", 'a', 1, t += 1000));
         assertEquals(0, s.evidenceCount());
         flag("killaura", 'a', 6);
         assertEquals(FlagResult.EVIDENCE, flag("killaura", 'a', 6), "sequência recomeçou do zero");
@@ -122,8 +144,8 @@ class EscalationTest {
     @Test
     void missingProviderDiscards() {
         flag("speed", 'a', 12);
-        assertEquals(FlagResult.CONNECTION_DISCARD, esc.onFlag(s, NO_PROVIDER, "speed", 'a', 12, t += 1000));
-        assertEquals(FlagResult.CONNECTION_DISCARD, esc.onFlag(s, null, "speed", 'a', 12, t += 1000));
+        assertEquals(FlagResult.CONNECTION_DISCARD, esc.onFlag(s, noProvider(), GEN, "speed", 'a', 12, t += 1000));
+        assertEquals(FlagResult.PROVIDER_INCOMPATIBLE, esc.onFlag(s, null, GEN, "speed", 'a', 12, t += 1000));
         assertEquals(0, s.evidenceCount());
     }
 
@@ -186,7 +208,7 @@ class EscalationTest {
         flag("killaura", 'a', 6);
         for (int i = 0; i < 500; i++) {
             t += 10;
-            esc.onFlag(s, STABLE, "speed", 'a', 30, t);
+            esc.onFlag(s, stable(), GEN, "speed", 'a', 30, t);
         }
         assertEquals(PlayerSession.Stage.IDLE, s.stage(), "killaura:a ainda só 2 de 3");
         assertTrue(s.evidenceCount() <= 2 + 2 + 3, "memória fixa: soma dos min-flags");
@@ -246,7 +268,7 @@ class EscalationTest {
                         return;
                     }
                     for (int k = 0; k < 20; k++) {
-                        if (esc.onFlag(ses, STABLE, check, 'a', 5, 1_000L) == FlagResult.TRIGGERED) {
+                        if (esc.onFlag(ses, stable(), GEN, check, 'a', 5, 1_000L) == FlagResult.TRIGGERED) {
                             triggers.incrementAndGet();
                         }
                     }

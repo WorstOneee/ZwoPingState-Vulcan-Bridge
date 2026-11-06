@@ -17,12 +17,34 @@ They are in [`dist/`](../dist), as separate files (no ZIP):
 
 | JAR | Purpose |
 | --- | --- |
-| `ZwoVulcanBridge-3.0.0.jar` | Anticheat escalation. Contains the `PingStateProvider` API. |
-| `ZwoPingState-1.0.0.jar` | Connection quality provider (the same 1.0.0 as before). Never punishes anyone. |
+| `ZwoVulcanBridge-3.1.0.jar` | Anticheat escalation. Contains the `PingStateProvider` API (with the revision snapshot). |
+| `ZwoPingState-1.1.0.jar` | Connection quality provider, with collection session and instability revisions. Never punishes anyone. |
 | `ModPanel-3.1.0.jar` | Moderation panel with `ProfileBanApi` (temporary ban of the profile only). Replaces SerpensModPanel 2.0.0 / ModPanel 3.0.0. |
 
 Load order is automatic: ZwoPingState has `softdepend: [ZwoVulcanBridge]`; the bridge has
 `softdepend: [Vulcan, floodgate, ModPanel]`.
+
+**Replace both JARs together.** Combinations:
+
+| Bridge | ZwoPingState | Result |
+| --- | --- | --- |
+| 3.1.0 | 1.1.0 | complete (recommended) |
+| 3.1.0 | 1.0.0 | automation **BLOCKED**: "provedor de conexão INCOMPATÍVEL" (provider incompatible); no flag counts |
+| 3.0.0 | 1.1.0 | works like 3.0 (without the fix); ZwoPingState warns in the console that the bridge is old |
+
+## Upgrading from 3.0.0 / 1.0.0 (no migration)
+
+1. Stop the server.
+2. In `plugins/`, replace `ZwoVulcanBridge-3.0.0.jar` with `ZwoVulcanBridge-3.1.0.jar` and `ZwoPingState-1.0.0.jar`
+   with `ZwoPingState-1.1.0.jar`. **Do not delete** the `plugins/ZwoVulcanBridge/` and `plugins/ZwoPingState/`
+   folders.
+3. Start the server. Check the console for
+   `[ZwoPingState] Provedor PingStateProvider registrado para a ZwoVulcanBridge (snapshot com revisões).`
+   and `/zvb status` for the line `Provedor de conexão: ZwoPingState 1.1.0 (snapshot v1)`.
+
+Nothing to migrate: `config.yml` (mode, approved checks and families, messages, durations), `historico.yml` and
+`decisoes.log` are read as they are. There are no new keys. The mode stays whatever your config says (the upgrade
+never turns ENFORCE on).
 
 ## 2. Step by step
 
@@ -32,7 +54,7 @@ Load order is automatic: ZwoPingState has `softdepend: [ZwoVulcanBridge]`; the b
 3. **ModPanel:** remove the old panel JAR and add `ModPanel-3.1.0.jar`. Coming from SerpensModPanel 2.0.0,
    ModPanel imports the config and the history on its own on first startup (see the ModPanel README). Do not delete
    the old folder until you have checked it.
-4. **Bridge:** replace `ZwoVulcanBridge-2.0.0.jar` (or 1.0.0) with `ZwoVulcanBridge-3.0.0.jar`. **Rename** the old
+4. **Bridge:** replace `ZwoVulcanBridge-2.0.0.jar` (or 1.0.0) with `ZwoVulcanBridge-3.1.0.jar`. **Rename** the old
    `plugins/ZwoVulcanBridge/config.yml` (the keys changed) so a new one is generated. The old `punicoes.log` and
    `strikes.yml` are no longer used.
 5. **Vulcan:** in `plugins/Vulcan/config.yml`, set **every check to `punishable: false`**. The bridge keeps
@@ -46,7 +68,7 @@ Load order is automatic: ZwoPingState has `softdepend: [ZwoVulcanBridge]`; the b
 [ZwoVulcanBridge] Modo: OBSERVE ...
 [ZwoVulcanBridge] Checks aprovados: 0 em 0 família(s) ...
 [ZwoVulcanBridge] ModPanel: ...
-[ZwoPingState] Provedor PingStateProvider registrado para a ZwoVulcanBridge.
+[ZwoPingState] Provedor PingStateProvider registrado para a ZwoVulcanBridge (snapshot com revisões).
 ```
 
 7. Run `/zvb status`. With a new config, **"Automação: BLOQUEADA — nenhum check aprovado"** (automation blocked, no
@@ -58,7 +80,8 @@ Load order is automatic: ZwoPingState has `softdepend: [ZwoVulcanBridge]`; the b
 
 - approved checks in at least 2 different families (`evidence.checks`);
 - Vulcan connected (listening to `VulcanFlagEvent`);
-- connection provider available (ZwoPingState enabled);
+- connection provider available **and providing the revision snapshot** (ZwoPingState 1.1.0+). A provider without
+  revisions is not treated as "no lag": automation stays blocked;
 - ModPanel 3.1.0+ with `ProfileBanApi` (version 1). ModPanel missing, disabled or outdated = **BLOCKED**, with the
   reason in the status. There is never a fallback to `/mpban`, `/mptempban` or `/ban-ip`.
 
@@ -114,16 +137,19 @@ Set `mode: ENFORCE` in `plugins/ZwoVulcanBridge/config.yml` and run `/zvb reload
 
 **Turn automation off right away (no restart):** `mode: OBSERVE` and `/zvb reload`. Or empty `evidence.checks`.
 
+**Go back to 3.0.0 / 1.0.0:** stop the server and swap both JARs back (repository tag `v3.0.0`). Config, history
+and log stay valid. 3.0 has the lag-between-flags flaw again.
+
 **Go back to bridge 2.0.0:**
 
 1. Stop the server.
-2. Replace `ZwoVulcanBridge-3.0.0.jar` with `ZwoVulcanBridge-2.0.0.jar` (it is in the repository history, commit
+2. Replace `ZwoVulcanBridge-3.1.0.jar` with `ZwoVulcanBridge-2.0.0.jar` (it is in the repository history, commit
    `7b3f5da`, tag `v2.0.0`).
 3. Restore the 2.0 `config.yml` from the backup. Keep `historico.yml` and `decisoes.log` (2.0 does not use them).
 4. Restore `plugins/Vulcan/config.yml` from the backup (2.0 relied on Vulcan punishing).
 
 **Go back to the old panel:** ModPanel 3.1.0 only **adds** the API, without changing the database. To go back to
-ModPanel 3.0.0, swap the JAR; bridge 3.0 will show "ModPanel: INCOMPATÍVEL" (incompatible) and block automation,
+ModPanel 3.0.0, swap the JAR; the bridge will show "ModPanel: INCOMPATÍVEL" (incompatible) and block automation,
 without breaking anything. Bans already applied by the bridge stay in the panel history (source `API`).
 
 **Remove everything:** remove the bridge and ZwoPingState JARs. Vulcan keeps only detecting while its checks are

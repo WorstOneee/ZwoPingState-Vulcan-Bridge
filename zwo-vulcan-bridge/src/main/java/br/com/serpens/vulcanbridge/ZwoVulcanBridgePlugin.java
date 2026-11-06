@@ -1,5 +1,6 @@
 package br.com.serpens.vulcanbridge;
 
+import br.com.serpens.vulcanbridge.api.ConnectionSnapshot;
 import br.com.serpens.vulcanbridge.api.ConnectionStatus;
 import br.com.serpens.vulcanbridge.core.AccountKind;
 import br.com.serpens.vulcanbridge.core.BridgeMode;
@@ -202,6 +203,8 @@ public final class ZwoVulcanBridgePlugin extends JavaPlugin implements Listener,
         }
         if (!provider.available()) {
             out.add("provedor de conexão (ZwoPingState) indisponível");
+        } else if (!provider.compatible()) {
+            out.add("provedor de conexão INCOMPATÍVEL: sem snapshot com revisões (atualize o ZwoPingState para 1.1.0+)");
         }
         if (banLink.backend() == null) {
             out.add("ModPanel: " + banLink.describe());
@@ -211,13 +214,18 @@ public final class ZwoVulcanBridgePlugin extends JavaPlugin implements Listener,
 
     // ------------------------------------------------------------------ evidências (qualquer thread)
 
-    /** O(1): mapa + leitura volátil do provedor + regra; agenda só quando a ocorrência dispara. */
+    /** O(1): mapa + um snapshot do provedor + regra; agenda só quando a ocorrência dispara. */
     @Override
     public void onFlag(Player player, String checkName, char checkType, int vl) {
         UUID id = player.getUniqueId();
         PlayerSession s = sessions.get(id);
-        ConnectionStatus c = provider.status(id);
-        if (escalation.onFlag(s, c, checkName, checkType, vl, System.currentTimeMillis())
+        if (s == null) {
+            escalation.onFlag(null, null, 0L, checkName, checkType, vl, 0L);
+            return;
+        }
+        long gen = provider.generation();
+        ConnectionSnapshot snap = provider.snapshot(id);
+        if (escalation.onFlag(s, snap, gen, checkName, checkType, vl, System.currentTimeMillis())
                 == Escalation.FlagResult.TRIGGERED) {
             try {
                 Bukkit.getScheduler().runTask(this, () -> act(s));
@@ -258,21 +266,15 @@ public final class ZwoVulcanBridgePlugin extends JavaPlugin implements Listener,
             return;
         }
 
-        // Revalidação imediatamente antes de agir.
-        ConnectionStatus c = provider.status(id);
-        if (!c.allowsEvaluation()) {
+        // Revalidação imediatamente antes de agir: snapshot novo, conferido contra a âncora da
+        // sequência (sessão de coleta e revisões). Lag detectado depois da última flag cancela.
+        long gen = provider.generation();
+        String why = Escalation.revalidate(s, provider.snapshot(id), gen, now);
+        if (why != null) {
             counters.revalidationDiscards.increment();
             s.resetToIdle();
-            s.decision("descartada na revalidação: conexão " + c.state() + "/" + c.reason());
-            record(s.name(), id, "ocorrência DESCARTADA na revalidação: conexão " + c.state() + "/" + c.reason(),
-                    evidence);
-            return;
-        }
-        if (s.inGrace(now)) {
-            counters.revalidationDiscards.increment();
-            s.resetToIdle();
-            s.decision("descartada na revalidação: proteção de " + s.graceCause());
-            record(s.name(), id, "ocorrência DESCARTADA na revalidação: proteção de " + s.graceCause(), evidence);
+            s.decision("descartada na revalidação: " + why);
+            record(s.name(), id, "ocorrência DESCARTADA na revalidação: " + why, evidence);
             return;
         }
 
