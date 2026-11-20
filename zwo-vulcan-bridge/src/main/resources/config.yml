@@ -70,7 +70,7 @@ sequence:
 
 # Messages shown to the kicked player.
 messages:
-  kick-1: "&cVocê foi desconectado pelo anticheat.\n&7Comportamento irregular detectado. Se acontecer de novo, nova desconexão; na terceira vez, ban temporário."
+  kick-1: "&cVocê foi desconectado pelo anticheat.\n&7Comportamento irregular detectado."
   kick-2: "&cVocê foi desconectado pelo anticheat pela 2ª vez.\n&7Na próxima ocorrência você será banido temporariamente."
 
 # Protections: flags during a protection do not count, and the action is
@@ -81,6 +81,15 @@ protections:
   teleport-seconds: 3
   respawn-seconds: 3
   world-change-seconds: 3
+
+# Network (Velocity). true = a bridge kick, and the kick ModPanel does when
+# applying the bridge's ban, remove the player from the whole network
+# instead of sending them to the lobby. Needs
+# bungee-plugin-message-channel = true in velocity.toml (the default). If
+# the proxy does not offer that channel, the normal kick happens and the
+# player goes to the fallback server, as before. /zvb status shows it.
+proxy:
+  disconnect-from-network: true
 
 bedrock:
   # Floodgate name prefixes. Name with a prefix = Bedrock (excluded from

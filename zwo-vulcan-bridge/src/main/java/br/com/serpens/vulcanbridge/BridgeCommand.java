@@ -95,6 +95,8 @@ final class BridgeCommand implements TabExecutor {
                 + " &7| geração &f" + plugin.provider().generation() + " &7| falhas &f" + plugin.provider().failures()
                 + " &7| snapshots inválidos &f" + plugin.provider().invalidSnapshots());
         msg(s, "&7ModPanel: " + (plugin.banLink().backend() != null ? "&a" : "&c") + plugin.banLink().describe());
+        msg(s, "&7Sair da rede no kick/ban: " + (st.disconnectFromNetwork() ? "&aligado &7— " + plugin.proxyKick().describe()
+                : "&eDESLIGADO &7(o jogador vai para o servidor de fallback)"));
         msg(s, "&7Floodgate: &f" + plugin.bedrock().floodgateState()
                 + (st.assumeJavaWithoutFloodgate() ? " &c(assume-java-without-floodgate ligado)" : ""));
         msg(s, "&7Evidências: aprovadas &f" + e.approvedFlags() + " &7| descartes por conexão &f" + e.connectionDiscards()

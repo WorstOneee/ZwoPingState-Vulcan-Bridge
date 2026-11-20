@@ -28,6 +28,7 @@ record BridgeSettings(
         boolean notifyStaff,
         boolean auditLog,
         boolean checkVulcanConfig,
+        boolean disconnectFromNetwork,
         List<String> problems) {
 
     static BridgeSettings load(FileConfiguration c) {
@@ -62,7 +63,7 @@ record BridgeSettings(
                 Math.max(5, c.getLong("sequence.ban-timeout-seconds", 30)) * 1000L,
                 c.getString("sequence.ban-reason", "Uso de trapaça detectado pelo anticheat (3ª ocorrência)"),
                 c.getString("sequence.actor", "ZwoVulcanBridge"),
-                c.getString("messages.kick-1", "&cVocê foi desconectado pelo anticheat.\n&7Comportamento irregular detectado. Na próxima vez, nova desconexão; depois, ban temporário."),
+                c.getString("messages.kick-1", "&cVocê foi desconectado pelo anticheat.\n&7Comportamento irregular detectado."),
                 c.getString("messages.kick-2", "&cVocê foi desconectado pelo anticheat pela 2ª vez.\n&7Na próxima ocorrência você será banido temporariamente."),
                 Math.max(0, c.getLong("protections.teleport-seconds", 3)) * 1000L,
                 Math.max(0, c.getLong("protections.respawn-seconds", 3)) * 1000L,
@@ -72,6 +73,7 @@ record BridgeSettings(
                 c.getBoolean("alerts.notify-staff", true),
                 c.getBoolean("alerts.audit-log", true),
                 c.getBoolean("alerts.check-vulcan-config", true),
+                c.getBoolean("proxy.disconnect-from-network", true),
                 List.copyOf(problems));
     }
 

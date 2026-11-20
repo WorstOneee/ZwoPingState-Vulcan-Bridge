@@ -57,6 +57,7 @@ public final class ZwoVulcanBridgePlugin extends JavaPlugin implements Listener,
     private VulcanHook vulcan;
     private BedrockDetector bedrock;
     private BanLink banLink;
+    private ProxyKick proxyKick;
     private IoWorker io;
     private AuditLog audit;
     private HistoryStore history;
@@ -97,6 +98,8 @@ public final class ZwoVulcanBridgePlugin extends JavaPlugin implements Listener,
         bedrock = BedrockDetector.create(getLogger());
         banLink = new BanLink();
         banLink.refresh();
+        proxyKick = new ProxyKick(this);
+        proxyKick.register();
 
         getServer().getPluginManager().registerEvents(provider, this);
         getServer().getPluginManager().registerEvents(banLink, this);
@@ -142,6 +145,9 @@ public final class ZwoVulcanBridgePlugin extends JavaPlugin implements Listener,
             vulcan.unhook();
         }
         sessions.clear();
+        if (proxyKick != null) {
+            proxyKick.unregister();
+        }
         if (io != null) {
             io.shutdown();
         }
@@ -392,6 +398,14 @@ public final class ZwoVulcanBridgePlugin extends JavaPlugin implements Listener,
             record(name, id, "ban temporário APLICADO e conferido pelo ModPanel (" + detail + "; jogador " + where + ")",
                     "");
             alert("&c" + name + " &7— ban temporário aplicado pelo ModPanel (registro #" + o.punishmentId() + ").");
+            // O ModPanel kicka o jogador ao banir. Se mesmo assim ele continuar aqui, a ponte kicka
+            // (e, com proxy.disconnect-from-network, tira da rede).
+            Bukkit.getScheduler().runTaskLater(this, () -> {
+                Player still = Bukkit.getPlayer(id);
+                if (still != null) {
+                    still.kick(text("&c" + settings.banReason()), PlayerKickEvent.Cause.BANNED);
+                }
+            }, 40L);
             return;
         }
         counters.bansReview.increment();
@@ -473,9 +487,44 @@ public final class ZwoVulcanBridgePlugin extends JavaPlugin implements Listener,
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onKick(PlayerKickEvent event) {
-        PlayerSession s = sessions.get(event.getPlayer().getUniqueId());
-        if (s != null && s.ownsKickEvent()) {
+        Player p = event.getPlayer();
+        PlayerSession s = sessions.get(p.getUniqueId());
+        boolean ours = s != null && s.ownsKickEvent();
+        if (ours) {
             s.kickEventResult(!event.isCancelled());
+        }
+        if (event.isCancelled() || !settings.disconnectFromNetwork()) {
+            return;
+        }
+        // Kick da ponte, ou o kick que o ModPanel faz ao aplicar o ban da ponte: tira o jogador da
+        // rede (proxy) em vez de ir para o lobby. A conexão ainda está aberta neste ponto.
+        if (ours || bridgeBanInProgress(p.getUniqueId())) {
+            if (!proxyKick.disconnect(p, event.reason())) {
+                warnProxyOnce();
+            }
+        }
+    }
+
+    private static final long BAN_KICK_WINDOW = TimeUnit.SECONDS.toMillis(60);
+    private volatile long lastProxyWarn;
+
+    /** Ban da ponte pedido agora há pouco (em andamento ou recém-aplicado). */
+    private boolean bridgeBanInProgress(UUID id) {
+        OffenderRecord rec = history.get(id).orElse(null);
+        if (rec == null) {
+            return false;
+        }
+        long age = System.currentTimeMillis() - rec.banAt();
+        return (rec.ban() == BanState.PENDING || rec.ban() == BanState.APPLIED) && age >= 0 && age <= BAN_KICK_WINDOW;
+    }
+
+    private void warnProxyOnce() {
+        long now = System.currentTimeMillis();
+        if (now - lastProxyWarn >= VULCAN_WARN_INTERVAL) {
+            lastProxyWarn = now;
+            getLogger().warning("Não deu para tirar o jogador da rede: o proxy não anunciou o canal BungeeCord. "
+                    + "Confira bungee-plugin-message-channel = true no velocity.toml. O kick normal foi aplicado "
+                    + "(o jogador vai para o servidor de fallback).");
         }
     }
 
@@ -547,6 +596,7 @@ public final class ZwoVulcanBridgePlugin extends JavaPlugin implements Listener,
     VulcanHook vulcan() { return vulcan; }
     BedrockDetector bedrock() { return bedrock; }
     BanLink banLink() { return banLink; }
+    ProxyKick proxyKick() { return proxyKick; }
     HistoryStore history() { return history; }
     IoWorker io() { return io; }
     AuditLog audit() { return audit; }

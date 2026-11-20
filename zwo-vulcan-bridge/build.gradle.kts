@@ -1,4 +1,4 @@
-version = "3.1.0"
+version = "3.2.0"
 
 // Cópia da API pública do ModPanel 3.1.0 (dev.zwo.modpanel.api), só para compilar.
 // NÃO vai para o JAR: em tempo de execução as classes vêm do próprio ModPanel.
@@ -9,6 +9,8 @@ dependencies {
     "modpanelApiCompileOnly"("io.papermc.paper:paper-api:${property("paperApiVersion")}")
     "compileOnly"(modpanelApi.output)
     "testImplementation"(modpanelApi.output)
+    // Só para o teste do formato da mensagem ao proxy (Adventure).
+    "testImplementation"("io.papermc.paper:paper-api:${property("paperApiVersion")}")
 }
 
 tasks.named<Jar>("jar") {
