@@ -21,6 +21,8 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
+import io.papermc.paper.ban.BanListType;
+import org.bukkit.ban.ProfileBanList;
 import org.bukkit.event.player.PlayerKickEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
@@ -111,6 +113,7 @@ public final class ZwoVulcanBridgePlugin extends JavaPlugin implements Listener,
         long now = System.currentTimeMillis();
         for (Player p : Bukkit.getOnlinePlayers()) {
             openSession(p, now);
+            checkLiftedBan(p);
         }
 
         BridgeCommand cmd = new BridgeCommand(this);
@@ -483,6 +486,35 @@ public final class ZwoVulcanBridgePlugin extends JavaPlugin implements Listener,
     @EventHandler(priority = EventPriority.LOWEST)
     public void onJoin(PlayerJoinEvent event) {
         openSession(event.getPlayer(), System.currentTimeMillis());
+        checkLiftedBan(event.getPlayer());
+    }
+
+    /**
+     * O ModPanel bane pela banlist de perfis do servidor e o /mpunban remove de lá. Se o histórico
+     * da ponte diz "ban aplicado" mas o perfil não está mais banido, a staff levantou o ban: o
+     * histórico recomeça e a próxima ocorrência volta ao 1º kick.
+     */
+    private void checkLiftedBan(Player p) {
+        UUID id = p.getUniqueId();
+        OffenderRecord rec = history.get(id).orElse(null);
+        if (rec == null || rec.ban() != BanState.APPLIED) {
+            return;
+        }
+        boolean stillBanned;
+        try {
+            ProfileBanList bans = Bukkit.getBanList(BanListType.PROFILE);
+            stillBanned = bans.isBanned(p.getPlayerProfile());
+        } catch (Throwable t) {
+            return; // sem como conferir: mantém o histórico como está
+        }
+        if (stillBanned) {
+            return; // entrou mesmo banido (bypass/op): nada muda
+        }
+        history.remove(id);
+        String line = "ban da ponte não está mais ativo (removido pela staff, ex.: /mpunban): histórico reiniciado; "
+                + "a próxima ocorrência começa do 1º kick";
+        record(p.getName(), id, line, "");
+        alert("&e" + p.getName() + " &7— " + line + ".");
     }
 
     @EventHandler(priority = EventPriority.MONITOR)

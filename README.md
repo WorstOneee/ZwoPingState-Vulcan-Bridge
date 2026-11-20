@@ -6,7 +6,7 @@ Goal: automatic anticheat punishment **only on strong evidence**, never because 
 | Plugin | Role |
 | --- | --- |
 | **ZwoPingState 1.1.0** | Reports, per UUID, a snapshot: `STABLE`/`UNSTABLE`/`UNKNOWN`, collection session, instability revisions (player and server) and freshness. **It never punishes anyone.** |
-| **ZwoVulcanBridge 3.2.0** | **The bridge makes the decision.** It reads Vulcan's flags, gathers evidence from approved checks and applies the per-UUID sequence: **kick → kick (another session) → 24 h temporary ban of the profile only**, recorded through ModPanel. Starts in **observation** mode. |
+| **ZwoVulcanBridge 3.2.1** | **The bridge makes the decision.** It reads Vulcan's flags, gathers evidence from approved checks and applies the per-UUID sequence: **kick → kick (another session) → 24 h temporary ban of the profile only**, recorded through ModPanel. Starts in **observation** mode. |
 | **ModPanel 3.1.0** | Moderation panel. Version 3.1.0 adds `ProfileBanApi`: a temporary ban by UUID with a verified result, **no IP ban**. |
 
 ```
@@ -79,7 +79,7 @@ the punishment and warns in the console.
 ./gradlew release
 ```
 
-Produces `build/release/ZwoVulcanBridge-3.2.0.jar` and `build/release/ZwoPingState-1.1.0.jar`. Prebuilt JARs are in
+Produces `build/release/ZwoVulcanBridge-3.2.1.jar` and `build/release/ZwoPingState-1.1.0.jar`. Prebuilt JARs are in
 [`dist/`](dist). ModPanel 3.1.0 is built in its own repository (`mvn package`); its JAR is also in `dist/` for
 convenience.
 
